@@ -151,19 +151,28 @@ const guardedSize = (guarded, clue) => {
 
 // ---- the ladder -------------------------------------------------------------
 // Five tiers, chosen by board size × how much of the board is black (which sets how many clues the
-// answer can carry). The score bands are *measured* output: `SAMPLES=24 npm run balance` prints the
-// quantile table these numbers were read from, and the ladder gate in that same file goes red if a
-// fresh sample falls out of them. A tier that silently became easier is the failure mode this family
-// has hit before, so the numbers below are data, not ambition — see tools/balance.mjs.
+// answer can carry). The score bands below are **measured**, not chosen: `SAMPLES=24 npm run balance`
+// prints the per-tier quantile table and the ladder gate in that same file goes red if a fresh
+// sample stops landing in its own band, or if the medians stop ordering. A tier that silently became
+// easier is the failure mode this family has hit before, so the numbers here are data, not ambition
+// — see tools/balance.mjs and DESIGN §5 for how they were read off.
 export const TIERS = [
-  { name: '入门', size: [5, 5], fill: 0.3, useNishio: false, band: [0, 0], zero: true },
-  { name: '简单', size: [6, 6], fill: 0.33, useNishio: false, band: [0, 0], zero: true },
-  { name: '中等', size: [7, 7], fill: 0.36, useNishio: true, band: [0, 0], zero: true },
-  { name: '困难', size: [9, 9], fill: 0.38, useNishio: true, band: [0, 0], zero: true },
-  { name: '大师', size: [11, 11], fill: 0.4, useNishio: true, band: [0, 0], zero: true },
+  { key: 'newbie', name: '入门', size: [5, 5], fill: 0.3, useNishio: false, band: [30, 48], zero: true },
+  { key: 'easy', name: '简单', size: [6, 6], fill: 0.33, useNishio: false, band: [48, 72], zero: true },
+  { key: 'medium', name: '中等', size: [7, 7], fill: 0.36, useNishio: true, band: [76, 118], zero: true },
+  { key: 'hard', name: '困难', size: [9, 9], fill: 0.38, useNishio: true, band: [126, 196], zero: true },
+  { key: 'master', name: '大师', size: [11, 11], fill: 0.4, useNishio: true, band: [200, 274], zero: true },
 ];
 
-export const tierIndexFor = (i) => Math.min(TIERS.length - 1, Math.max(0, i | 0));
+export const tierIndexFor = (i) => {
+  if (typeof i === 'string') {
+    const k = TIERS.findIndex((t) => t.key === i);
+    return k < 0 ? 0 : k;
+  }
+  return Math.min(TIERS.length - 1, Math.max(0, i | 0));
+};
+
+export const tierFor = (i) => TIERS[tierIndexFor(i)];
 
 // One puzzle: an answer, a trimmed clue set, and the derivation the player will be walked through.
 // `tries` bounds the search so a bad seed fails loudly instead of hanging a build step.
