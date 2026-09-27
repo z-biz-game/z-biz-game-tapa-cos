@@ -144,8 +144,9 @@ npm run electron     # 桌面壳（electron/main.cjs，同一份代码，无构�
   （二乘二禁 **或** 白格连通）在场"（`tools/balance.mjs:265-268`），本轮实测中等档代表盘
   二乘二禁 0 次、白格连通 9 次。
 - **未验证**（跑过才有资格写，这里没跑过）：Safari / Firefox / 移动端实机——门禁只在本机 headless Chrome
-  上跑；**Pages 线上产物**——本仓 `git remote -v` 为空、尚未接远端，
-  `BASE_URL=… npm run verify` 这一条没执行过（`tools/verify.sh` 支持它，支持不等于做过）；
+  与**已部署的 Pages 产物**上跑过（后者 2026-09-28 实测：
+  `BASE_URL=https://z-biz-game.github.io/z-biz-game-tapa-cos/ npm run verify` → 11 个场景
+  476 条断言 0 失败，exit 0；本地根路径那一次同样 476/0）；
   读屏与键盘无障碍（画布只有一个 `aria-label`，`index.html:82`；`#state-line` 有 `aria-live`，
   `index.html:95`，仅此而已）；低端机上的出题与穷举耗时；`count.js` 的 `code:'invalid'` 分支
   （`count.js:127`——`createBoard` 已先把环长不够的盘拒了，测试里没有任何一例走到那条）。

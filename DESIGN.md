@@ -338,7 +338,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 `rleDecode` 对坏游程跳过、缺的补成未知（`:52-63`）。
 本轮实测：`save` 场景 **49 格的续局不过四百字节**（读数 `bytes 119 · runs 8 · cells 49`），
 **坏游程被跳过、缺的补成未知**、**格数不符的存档不肯装这盘**、**八种坏存档一律整份丢弃**、
-**5×5 的存档装不进 9×9 的盘**（`tools/scenarios.js:1034-1049`、`:1156`）；
+**5×5 的存档装不进 9×9 的盘**（`tools/scenarios.js:1027-1055`、`:1162`）；
 `resume` 场景 `restored 10 · hints 2 · moves 8`。
 隐私模式那一路在 `tools/engine-test.mjs` §8 用假 `localStorage`（属性访问就抛）打，
 断言 **隐私模式下清空存档同样不抛错**、**抛错的那个 localStorage 一次也没被写穿过**。
@@ -346,9 +346,9 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 **44 是 DOM 按钮的承诺，不是画布格子的承诺。** `css/game.css:61-71` 给 `button` 上
 `min-height: var(--touch-min)`（那句在 `:65`，注释在 `:59-60`），`js/theme.js:57` `Touch = { min: 44 }`；
 全屏唯一一处豁免是 `button.link`（`css/game.css:93-100`，`min-height: 0` + 12px），
-而且**按 id 钉死**：**全屏只有清空存档豁免 44** = `btn-reset`（`tools/scenarios.js:1287`），
-棋局屏的九条名册与选档屏的八条名册各自有一条 `eq` 盯着（`:1281`、`:1295`），
-测量方法是逐个 `getBoundingClientRect()`、两轴都算、只量有 client rect 的控件（`:1262-1276`）。
+而且**按 id 钉死**：**全屏只有清空存档豁免 44** = `btn-reset`（`tools/scenarios.js:1293`），
+棋局屏的九条名册与选档屏的八条名册各自有一条 `eq` 盯着（`:1287`、`:1301`），
+测量方法是逐个 `getBoundingClientRect()`、两轴都算、只量有 client rect 的控件（`:1268-1284`）。
 画布上的格走另一套下限：`js/theme.js:79` `Cell = { min: 26, max: 64, … }`，
 `play`/`layout` 场景在 900×900 视口下读到的 cell 是 44 px、`ink` 场景读到 64——**这些是读数不是承诺**。
 
@@ -363,6 +363,10 @@ SAMPLES=24 npm run balance     # → 结论：阶梯与两条承诺都成立（e
                                #   中位 41.8 < 63.2 < 88.3 < 154.7 < 233.2；各档 24/24 出货、命中 100%
                                #   15/15 零猜测、15/15 穷举逐格一致、60/60 种解自洽、复解一致 5/5
 npm run verify                 # → === ALL GREEN ===：11 个场景 476 条浏览器断言、0 失败（5312 / 9362）
+BASE_URL=https://z-biz-game.github.io/z-biz-game-tapa-cos/ npm run verify
+                               # → 同一套 11 场景 / 476 条 / 0 失败（2026-09-28 对已部署产物实跑）
+                               #   这一条不是可选项：本地根路径全绿而 Pages 的 /<repo>/ 前缀下
+                               #   `save` 场景曾因 `import('/js/store.js')` 404 而 NO RESULT。
 ```
 
 **两套中位数不可互换**，这是本轮复核过的事，也是 `README.md` 难度表下面那句警告的出处：
