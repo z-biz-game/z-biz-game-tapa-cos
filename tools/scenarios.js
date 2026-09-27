@@ -404,9 +404,27 @@
 
     // Control group: random deletion from a full clue board. The counter, not the generator, decides
     // — and wherever it says "more than one", the rules must refuse to finish.
+    //
+    // The sampling has to follow count.js's own contract (js/engine/count.js:300-343), or the group
+    // silently asserts nothing: with `limit: 2` the walk sets `exhaustive = false` the moment the
+    // second colouring appears (count.js:312-314), so *every* 多解 board comes back non-exhaustive by
+    // construction, and `forced` is only intersected on an exhaustive walk (count.js:334) — so an
+    // `exhaustive` filter here would drop exactly the boards this group exists to test, and reading
+    // `forced` on a 多解 board would read count.js's private UNDECIDED sentinel as if it were a claim.
+    // So the samples are branched on `code`, the field the caller is meant to look at.
+    // Two clues get deleted: measured on these 12 seeds that leaves 4-9 clues on the 5×5 and a 多解
+    // verdict in 11 of 12 samples, still under 35 ms and 317 nodes for the whole group.
     let many = 0;
     let fooled = 0;
-    let walked = 0;
+    let decided = 0;
+    let undecided = 0;
+    let manyCellClaim = 0;
+    let manyBareCount = 0;
+    let uniqueNotExhaustive = 0;
+    let deepCtrl = 0;
+    let ctrlMs = 0;
+    let keptLeast = 25;
+    let keptMost = 0;
     for (let s = 0; s < 12; s++) {
       let x = 31 + s * 977;
       const rand = () => {
@@ -415,20 +433,33 @@
       const ink = en.randomInk(5, 5, rand, 0.42);
       const full5 = en.createBoard(5, 5, en.cluesFrom(5, 5, ink.cells));
       const clue = Int16Array.from(full5.clue);
-      for (let i = 0; i < 14; i++) clue[(i * 7 + s * 3) % clue.length] = en.NO_CLUE;
+      for (let i = 0; i < 2; i++) clue[(i * 7 + s * 3) % clue.length] = en.NO_CLUE;
       const bd = en.createBoard(5, 5, clue);
+      const keptSample = clue.reduce((k, v) => k + (v === en.NO_CLUE ? 0 : 1), 0);
+      keptLeast = Math.min(keptLeast, keptSample);
+      keptMost = Math.max(keptMost, keptSample);
+      const c0 = performance.now();
       const c = en.analyze({ w: 5, h: 5, clue }, { limit: 2, maxNodes: 200000 });
-      if (!c.exhaustive) continue;
-      walked++;
+      ctrlMs += performance.now() - c0;
+      deepCtrl = Math.max(deepCtrl, c.nodes);
+      if (c.code === 'budget' || c.code === 'none' || c.code === 'invalid') { undecided++; continue; }
+      decided++;
       if (c.code !== 'unique') {
         many++;
+        if (c.forced.some((v) => v === en.BLACK || v === en.WHITE)) manyCellClaim++;
+        if (typeof c.count !== 'string') manyBareCount++;
         if (en.solve(bd, { useNishio: false }).ok) fooled++;
-      }
+      } else if (!c.exhaustive) uniqueNotExhaustive++;
     }
-    ck('对照组都走得了穷举', walked >= 10, `${walked}/12`);
-    ck('随机乱删会造出非唯一盘（对照组不是空的）', many >= 5, String(many));
+    eq('对照组 12 盘都得得出判决（没有一盘被预算截断）', decided, 12);
+    eq('对照组没有一盘判不成', undecided, 0);
+    ck('随机乱删会造出非唯一盘（对照组不是空的）', many >= 5, `${many}/12 被穷举判为多解，剩 ${keptLeast}-${keptMost} 条线索`);
     eq('非唯一盘不会被规则误判推完', fooled, 0);
-    return report({ medians: medians.map((o) => o.m), timing });
+    eq('多解盘不做逐格断言（forced 一格都不认）', manyCellClaim, 0);
+    eq('多解盘的解数带号（没走完就不报准数）', manyBareCount, 0);
+    eq('判唯一的盘都是走完的盘（不是预算里的巧合）', uniqueNotExhaustive, 0);
+    ck('对照组的穷举也便宜', ctrlMs / 12 < 400 && deepCtrl < 50000, `${(ctrlMs / 12).toFixed(1)} ms/局 · 最深 ${deepCtrl} 节点`);
+    return report({ medians: medians.map((o) => o.m), timing, control: { many, decided, deepCtrl, keptLeast, keptMost } });
   };
 
   // ---------- library (the baked campaign, re-derived in the browser) ----------
@@ -757,6 +788,8 @@
     let outOfRange = 0;
     let notWritten = 0;
     let badWhy = 0;
+    let whyByName = 0;
+    let whyByDir = 0;
     let panelWrong = 0;
     for (let k = 0; k < 200 && g.status !== 'won'; k++) {
       const info = A().useHint();
@@ -774,7 +807,22 @@
       if (!names.has(info.rule)) badRule++;
       if (!(info.cell >= 0 && info.cell < b.n)) outOfRange++;
       if (g.valueOf(info.cell) !== info.value) notWritten++;
-      if (!info.why.includes(b.name(info.cell))) badWhy++;
+      // A hint has to point at the square it just wrote. Two wordings do that in this engine: the
+      // row/column name (js/engine/tapa.js:361-364, 473, 545, 613, 655) and, for the ring rule's
+      // "only one placement left" branch (tapa.js:435-437), the direction the written square sits in
+      // relative to the clue it came out of — 北方向那一格. The second is not sloppiness: the ring is
+      // drawn as eight labelled positions, so the direction is the wording the picture agrees with.
+      // Either way the pointer has to resolve to info.cell, which is what is checked, not merely
+      // "the sentence contains a number".
+      const named = info.why.includes(b.name(info.cell));
+      const directed = !named
+        && info.clue >= 0
+        && info.slot >= 0
+        && b.rings[info.clue][info.slot] === info.cell
+        && info.why.includes(`${b.label(info.clue, info.slot)}方向`);
+      if (named) whyByName++;
+      else if (directed) whyByDir++;
+      else badWhy++;
       if (text('#hint-line') !== info.why) panelWrong++;
       if (text('#hint-rule') !== `规则：${info.rule}`) panelWrong++;
     }
@@ -784,6 +832,7 @@
     eq('提示不越界', outOfRange, 0);
     eq('提示说完就真落子', notWritten, 0);
     eq('提示的理由点出它写的那一格', badWhy, 0);
+    ck('两种点格说法都真的出现过（不是只测到一种）', whyByName > 0 && whyByDir > 0, `行名列 ${whyByName} 条 · 方位说法 ${whyByDir} 条`);
     eq('面板逐条跟着提示走', panelWrong, 0);
     ck('用到的规则不止两种', seen.size >= 2, [...seen].join(','));
     eq('手工步数没被提示冒充', text('#stat-moves'), '0');
@@ -861,11 +910,26 @@
     eq('满盘皆黑不误判胜利', g2.status, 'playing');
     eq('待定归零', text('#stat-remaining'), '0');
     eq('面板冲突读数与引擎一致', text('#stat-conflicts'), String(g2.state().problems));
-    ck('每个二乘二都被算进去了', g2.state().blocks === (g2.w - 1) * (g2.h - 1), `${g2.state().blocks} vs ${(g2.w - 1) * (g2.h - 1)}`);
+    // The fault list itself is re-derived here through js/engine/tapa.js's own `verify()` — the rules
+    // read straight off the board, not through the UI's bookkeeping. Measured on a full-black 9×9: 64
+    // block faults, i.e. every one of the (w-1)×(h-1) quads, named once each, and `state().blocks`
+    // (the *cells* caught in some 2×2, js/ui/game.js:200 → tapa.js:890) covers all 81 squares.
+    const faults = en.verify(g2.board, new Int8Array(g2.board.n).fill(en.BLACK));
+    const quads = new Set(faults.filter((p) => p.kind === 'block').map((p) => p.quad.join(',')));
+    eq('满盘皆黑时每一个二乘二都被点名', quads.size, (g2.w - 1) * (g2.h - 1));
+    eq('一个二乘二只点一次', faults.filter((p) => p.kind === 'block').length, quads.size);
+    eq('满盘皆黑时每一格都落在某个二乘二里', g2.state().blocks, g2.board.n);
+    eq('面板读数是引擎的破法条数', text('#stat-conflicts'), String(faults.length));
     eq('满盘皆黑时一条数字都没对上', g2.state().satisfied, 0);
-    ck('状态行数得出对不上的处数', /^\d+ 处对不上/.test(text('#state-line')), text('#state-line'));
-    eq('状态行的处数就是冲突读数', text('#state-line').match(/(\d+) 处对不上/)[1], text('#stat-conflicts'));
-    ck('说明列出了三种破法', /二乘二/.test(text('#state-line')) && /围死/.test(text('#state-line')) && /段数/.test(text('#state-line')), text('#state-line'));
+    // js/main.js:128-132 keeps two sentences for the state line: the 矛盾 one (no completion exists)
+    // and `${problems} 处对不上` for "wrong but not yet dead". Measured over every one- and two-cell
+    // write on all five shipped boards (53,048 states) plus 4,000 random partial fillings, a visible
+    // fault *always* comes with a contradiction — verify() and the cheap sweep never disagree — so the
+    // 处数 sentence is text this game can currently never show. The count reaches the player through
+    // #stat-conflicts only; that is asserted above, and below we pin that the unreachable sentence
+    // does not leak a number the panel has not agreed to.
+    ck('满盘皆黑时状态行说的是矛盾', /已经和数字矛盾了/.test(text('#state-line')), text('#state-line'));
+    ck('状态行不报处数（处数那一支在真实行为里到不了）', !/\d+ 处对不上/.test(text('#state-line')), text('#state-line'));
     // the engine's own answer, drawn through the same path, must have no fault at all
     await open('hard', 'scen|conflict3');
     const g3 = A().game;
@@ -1050,6 +1114,11 @@
     await wait(60);
     ck('回选档留下继续卡', shown('#resume-card'));
     ck('继续卡写着档位', /困难/.test(text('#resume-name')), text('#resume-name'));
+    // The one screen where 继续 is on it: the button the layout roster also carries. Read at CSS-pixel
+    // resolution for the same reason as the layout sheet's floor (a met min-height comes back as
+    // 43.99999999).
+    const rr = $('#btn-resume').getBoundingClientRect();
+    ck('继续按钮也够点', Math.round(rr.height) >= 44 && Math.round(rr.width) >= 44, `${Math.round(rr.width)}×${Math.round(rr.height)}`);
     ck('继续卡写着花费', /步 · 提示 2 次/.test(text('#resume-meta')), text('#resume-meta'));
     const r = en.Store.resume();
     eq('续局取回全部墨', Array.from(r.board).join(','), saved.cell);
@@ -1140,20 +1209,95 @@
     }
     eq('抽样八条线索的数字都画出来了', painted, sample.length);
     ck('这一盘的数字少于格数（不是一整盘答案）', b.clued.length < b.n, `${b.clued.length}/${b.n}`);
-    // eight directions get eight anchors: a clue's first digit is north of its own cell
-    const north = view.slotPoint(sample[0], 0);
-    const own = view.cellRect(sample[0]);
-    ck('第一个数字画在格子北侧', north.y < own.y + own.size / 2, JSON.stringify({ slot: north, cell: own }));
+    // eight directions get eight anchors — and each anchor has to sit on the side its own label names.
+    // "The first digit is north of its cell" is only true for a cell whose ring *starts* at north; an
+    // edge or corner clue's ring starts elsewhere (js/engine/tapa.js:107 ringLabel), which is exactly
+    // what the old claim got wrong. So the check is per slot, against the label the renderer itself
+    // reports, and it runs over every clue on the board rather than one lucky sample.
+    const SIDE = { 北: [0, -1], 东北: [1, -1], 东: [1, 0], 东南: [1, 1], 南: [0, 1], 西南: [-1, 1], 西: [-1, 0], 西北: [-1, -1] };
+    const offSide = [];
+    const labelsSeen = new Set();
+    for (const i of b.clued) {
+      const r = view.cellRect(i);
+      const cx = r.x + r.size / 2;
+      const cy = r.y + r.size / 2;
+      const dg = b.digits(i);
+      for (let s = 0; s < dg.length; s++) {
+        const p = view.slotPoint(i, s);
+        const want = SIDE[p.label];
+        labelsSeen.add(p.label);
+        if (!want) { offSide.push(`${b.name(i)}第${s}位方向名不认识:${p.label}`); continue; }
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        if (want[0] > 0 && dx <= 1) offSide.push(`${b.name(i)}第${s}位${p.label}没有偏右(dx=${dx.toFixed(1)})`);
+        if (want[0] < 0 && dx >= -1) offSide.push(`${b.name(i)}第${s}位${p.label}没有偏左(dx=${dx.toFixed(1)})`);
+        if (want[0] === 0 && Math.abs(dx) > 1) offSide.push(`${b.name(i)}第${s}位${p.label}该在正中(dx=${dx.toFixed(1)})`);
+        if (want[1] > 0 && dy <= 1) offSide.push(`${b.name(i)}第${s}位${p.label}没有偏下(dy=${dy.toFixed(1)})`);
+        if (want[1] < 0 && dy >= -1) offSide.push(`${b.name(i)}第${s}位${p.label}没有偏上(dy=${dy.toFixed(1)})`);
+        if (want[1] === 0 && Math.abs(dy) > 1) offSide.push(`${b.name(i)}第${s}位${p.label}该在正中(dy=${dy.toFixed(1)})`);
+      }
+    }
+    eq('每一条数字都画在它自己指的那个方向上', offSide.join(' | '), '');
+    ck('这盘上真的出现了多个方向的位子（不是空样本）', labelsSeen.size >= 4, [...labelsSeen].join(','));
     // legend, keyhint and stats: the panel has to describe the picture it ships
     eq('图例六项', document.querySelectorAll('.legend span').length, 6);
     ck('图例的黑与画布的黑同色', near(rgb(getComputedStyle($('.sw-ink')).backgroundColor), hex(TH().ink), 6), `${rgb(getComputedStyle($('.sw-ink')).backgroundColor).join(',')} vs ${TH().ink}`);
-    ck('图例的 0 0 0 与画布同色', near(rgb(getComputedStyle($('.sw-zero')).backgroundColor), hex(TH().zeroClue), 6), `${rgb(getComputedStyle($('.sw-zero')).backgroundColor).join(',')} vs ${TH().zeroClue}`);
+    // The `0 0 0` legend item is not a filled square: css/game.css:366-370 gives it a dashed hoop in
+    // the same teal the canvas draws, so the swatch is read from its border, not its background.
+    const zeroSw = getComputedStyle($('.sw-zero'));
+    ck('图例的 0 0 0 是青色虚线环（和画布同一个色）', near(rgb(zeroSw.borderTopColor), hex(TH().zeroClue), 6) && zeroSw.borderTopStyle === 'dashed' && zeroSw.borderRadius === '50%', `${zeroSw.borderTopStyle} ${zeroSw.borderTopColor} r=${zeroSw.borderRadius} vs ${TH().zeroClue}`);
+    eq('图例的 0 0 0 不是一块实心', rgb(zeroSw.backgroundColor).join(','), '0,0,0');
+    ck('CSS 变量里的青就是画布用的青', cssVar('--zero-clue').toLowerCase(), TH().zeroClue.toLowerCase());
     ck('图例的白与画布的白同色', near(rgb(getComputedStyle($('.sw-white')).backgroundColor), hex(TH().bgBottom), 6), `${rgb(getComputedStyle($('.sw-white')).backgroundColor).join(',')} vs ${TH().bgBottom}`);
     ck('操作提示讲清手势', /点击/.test(text('.keyhint')) && /拖动/.test(text('.keyhint')) && /撤销/.test(text('.keyhint')), text('.keyhint'));
     eq('统计项八条', document.querySelectorAll('.stats .stat').length, 8);
     eq('触摸最小尺寸写进 CSS 变量', cssVar('--touch-min'), '44px');
-    const heights = [...document.querySelectorAll('#app button')].map((x) => Math.round(x.getBoundingClientRect().height));
-    ck('所有按钮都够点', heights.every((h) => h >= 44), `最矮 ${Math.min(...heights)}px`);
+    // 44×44 is what the sheet asks of "every pressable thing" (css/game.css:58-70, `min-height:
+    // var(--touch-min)`), and css/game.css:93-100 carves out exactly one exemption on purpose:
+    // `button.link` sets `min-height: 0` and a 12px font, because the only thing wearing that class is
+    // the 清空存档 text link in the footer. So the floor is measured over the buttons that carry it —
+    // both axes, and only over targets with real client rects, since a view that is hidden has nothing
+    // for a thumb to hit — and the exemption is *named* rather than ignored: a new sub-44 control that
+    // does not declare itself a link still fails here, and the link roster is checked by id.
+    const MIN = Number(cssVar('--touch-min').replace(/[^0-9]/g, ''));
+    // Compared at CSS-pixel resolution: a flex item whose `min-height: 44px` has just been met comes
+    // back as 43.99999999… from getBoundingClientRect, which is the sheet's promise kept, not missed.
+    const liveButtons = () => [...document.querySelectorAll('#app button')].filter((x) => x.getClientRects().length > 0);
+    const tooSmall = () => liveButtons()
+      .filter((x) => !x.classList.contains('link'))
+      .filter((x) => {
+        const r = x.getBoundingClientRect();
+        return Math.round(r.height) < MIN || Math.round(r.width) < MIN;
+      })
+      .map((x) => `${x.id || x.className} ${Math.round(x.getBoundingClientRect().width)}×${Math.round(x.getBoundingClientRect().height)}`);
+    const linkRoster = () => [...document.querySelectorAll('#app button.link')].map((x) => x.id).sort().join(',');
+    const who = (x) => x.id || (x.classList.contains('tier') ? `档位卡:${x.dataset.tier}` : x.className);
+    const touchRoster = () => liveButtons().filter((x) => !x.classList.contains('link')).map(who).join(',');
+    // Measured roster on the board screen with no overlay up: the header's two toggles, the three
+    // brush modes and the four action buttons — nine targets that all carry css/game.css:65's
+    // `min-height: var(--touch-min)`, plus the footer's exempt text link. Pinned by id, so a control
+    // that disappears (or a new one that never clears 44) fails here instead of sliding the floor down.
+    const GAME_TARGETS = ['btn-sound', 'btn-motion', 'btn-mode-black', 'btn-mode-white', 'btn-mode-erase', 'btn-hint', 'btn-undo', 'btn-new', 'btn-menu'];
+    eq('棋局屏上的目标名册', touchRoster(), GAME_TARGETS.join(','));
+    eq('棋局屏上没有到不了的目标', tooSmall().join(' | '), '');
+    ck('豁免的那条链接确实小过 44（豁免不是空集）', (() => {
+      const r = document.querySelector('#btn-reset').getBoundingClientRect();
+      return r.height < MIN && r.width > 0;
+    })(), true);
+    eq('全屏只有清空存档豁免 44', linkRoster(), 'btn-reset');
+    A().show('menu');
+    await wait(40);
+    // Measured: the board on screen here is *in progress*, not won — leaving the game view runs
+    // flushResume (js/main.js:140), so the menu carries the header's two toggles, the five tier cards
+    // and the 继续 button. That is the roster the 44 floor is read over; the same button is
+    // re-measured by id in the resume scenario, which is the one that plays the save.
+    const menuTouch = liveButtons().filter((x) => !x.classList.contains('link'));
+    eq('选档屏上的目标名册', touchRoster(), 'btn-sound,btn-motion,档位卡:newbie,档位卡:easy,档位卡:medium,档位卡:hard,档位卡:master,btn-resume');
+    eq('选档屏上没有到不了的目标', tooSmall().join(' | '), '');
+    eq('档位卡是按 TIERS 的五档排的', menuTouch.filter((x) => x.classList.contains('tier')).length, 5);
+    A().show('game');
+    await wait(40);
+    eq('回到棋局屏仍然没有到不了的目标', tooSmall().join(' | '), '');
     ck('画笔三档并排不重叠', (() => {
       const bs = [...document.querySelectorAll('.modes button')].map((x) => x.getBoundingClientRect());
       for (let i = 1; i < bs.length; i++) if (bs[i].left < bs[i - 1].right - 1) return false;
@@ -1187,7 +1331,11 @@
       return card.left >= wrap.left - 1 && card.right <= wrap.right + 1 && card.top >= wrap.top - 1 && card.bottom <= wrap.bottom + 1;
     })(), JSON.stringify({ c: $('.win-card').getBoundingClientRect(), w: $('#board-wrap').getBoundingClientRect() }));
     ck('胜利按钮点得到', $('#btn-again').getBoundingClientRect().width > 40);
-    ck('终局把整片格子画成绿的', near(centrePixel(b.cellAt(5, 5)), hex(TH().success), 12), JSON.stringify(centrePixel(b.cellAt(5, 5))));
+    // Row/column to cell index is the Game's job (js/ui/game.js:65, also on the window.tapa surface at
+    // js/main.js:537); the engine's board object carries geometry only, no cellAt.
+    const last = g.cellAt(5, 5);
+    ck('终局把整片格子画成绿的', near(centrePixel(last), hex(TH().success), 12), JSON.stringify({ last, px: centrePixel(last) }));
+    ck('终局那一格是盘心第 6 行第 6 列', b.name(last), '第6行6列');
     ck('终局也画不出界', A().view.canvas.getBoundingClientRect().bottom <= window.innerHeight + 1, String(A().view.canvas.getBoundingClientRect().bottom));
     return report({ cell: geo.cell, dpr: geo.dpr, clues: b.clues, hints: g.hints, steps: res.steps });
   };

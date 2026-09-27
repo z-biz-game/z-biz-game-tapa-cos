@@ -5,7 +5,7 @@
 import { Palette, Cell, applyThemeVars, setReduceMotion, systemPrefersReducedMotion } from './theme.js';
 import { Sound } from './audio/synth.js';
 import { Store } from './store.js';
-import { TIERS, tierFor, tierIndexFor, generate } from './engine/generate.js';
+import { TIERS, tierFor, tierIndexFor, generate, randomInk } from './engine/generate.js';
 import { LIBRARY, byTier } from './data/library.js';
 import { dayKey } from './engine/rng.js';
 import * as Engine from './engine/tapa.js';
@@ -549,6 +549,13 @@ const surface = {
   engine: {
     ...Engine,
     generate,
+    // The generator's own legal-ink builder (js/engine/generate.js:41). It ships as part of the engine
+    // module graph the surface documents as testable, and the browser-side 对照组 — delete clues from
+    // a full clue board and see whether the counter and the pencil rules disagree — has to sample ink
+    // from the same builder that makes every board this game ships. A second ink builder written
+    // inside tools/scenarios.js would not be one: the shipped builder is what refuses 2×2 closures and
+    // severed whites, and legal ink is the whole premise of that group.
+    randomInk,
     puzzleFrom,
     defaultSeed,
     analyze,
