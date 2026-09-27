@@ -380,8 +380,8 @@ function preview(t, value) {
   game.recompute();
 }
 
-function unpreview() {
-  for (const it of stroke.items) game.st.cell[it.cell] = it.from;
+function unpreview(s = stroke) {
+  for (const it of s.items) game.st.cell[it.cell] = it.from;
   game.recompute();
 }
 
@@ -416,7 +416,10 @@ function strokeEnd() {
   const s = stroke;
   stroke = null;
   const cells = s.items.map((it) => it.cell);
-  unpreview();
+  // The stroke it is un-painting has already been detached from the module state above, so it has to
+  // be handed over explicitly: `unpreview()` would read the now-null global and throw before the
+  // gesture is committed — the ink stays on the board as a phantom that no 撤销 can take back.
+  unpreview(s);
   if (!s.moved) {
     const step = game.tap(cells[0]);
     if (step) afterStep(step.value);
