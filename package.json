@@ -11,7 +11,7 @@
     "test": "node tools/engine-test.mjs",
     "bake": "node tools/bake.mjs",
     "balance": "node tools/balance.mjs",
-    "check": "for f in js/*.js js/*/*.js; do node --check \"$f\" || exit 1; done && node --check server.cjs && node --check electron/main.cjs && node --check electron/preload.cjs && for f in tools/*.mjs; do node --check \"$f\" || exit 1; done && test -f index.html && test -f css/game.css && grep -q '<canvas' index.html && grep -q 'js/main.js' index.html && echo OK"
+    "check": "for f in js/*.js js/*/*.js; do node --check \"$f\" || exit 1; done && node --check server.cjs && node --check electron/main.cjs && node --check electron/preload.cjs && for f in tools/*.mjs; do node --check \"$f\" || exit 1; done && test -f index.html && test -f css/game.css && test -f js/data/library.js && grep -q '<canvas' index.html && grep -q 'js/main.js' index.html && echo OK"
   },
   "keywords": [
     "game",

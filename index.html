@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#070A14" />
+<title>视窗 · Tapa 八邻环分段推理</title>
+<meta name="description" content="Tapa 视窗：一组数字写着黑格在你周围八格里怎么分组长短。每局唯一解、每局都能用逻辑推到底，提示只说推得出的那一步。" />
+<!-- Inline icon: without it the browser probes the Pages domain root for /favicon.ico and logs a 404.
+     The mark is the game's own idea — a black clue cell, its digits grouped around it, and the dashed
+     hoop that means `0 0 0` (which is not the same thing as "no clue here"). -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070A14'/%3E%3Crect x='9' y='13' width='14' height='14' rx='2.5' fill='%23F2F5FB'/%3E%3Ctext x='16' y='6.6' fill='%23FFC85C' font-family='monospace' font-size='7.4' font-weight='700' text-anchor='middle'%3E2%3C/text%3E%3Ctext x='28.4' y='22' fill='%23FFC85C' font-family='monospace' font-size='7.4' font-weight='700' text-anchor='middle'%3E1%3C/text%3E%3Ctext x='3.8' y='22' fill='%23FFC85C' font-family='monospace' font-size='7.4' font-weight='700' text-anchor='middle'%3E3%3C/text%3E%3Ccircle cx='16' cy='20' r='4.2' fill='none' stroke='%236FD3C5' stroke-width='1.6' stroke-dasharray='2.4 1.8'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="css/game.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>视窗</h1>
+      <p class="sub">Tapa · 八邻环分段推理</p>
+    </div>
+    <div class="top-actions">
+      <button id="btn-sound" class="ghost" type="button" aria-pressed="true">音效 开</button>
+      <button id="btn-motion" class="ghost" type="button" aria-pressed="false">动效 全</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-menu" class="view">
+      <div class="menu-hero">
+        <h2>数字写着黑格在你周围八格里怎么长，一段一段从正北顺时针数过去</h2>
+        <p>
+          带数字的那一格<b>自己就是黑的</b>。它周围的八格连成一个环，数字按顺时针读：先数北边那一段有多长，
+          再数下一段。<code>2 1</code> 就是说环上有两段黑格，一段两格、一段一格，中间至少隔一格白。
+          <b>0 0 0</b> 是一句实打实的证词：这一格是白的，它周围八格也全是白的——它和"这里没数字"是两回事，
+          画面上也不一样（三个青色零，外加一圈虚线环）。
+          黑格不能凑满一个二乘二，白格必须连成一整片。
+          这里没有运气题：每一局都只有一个答案，也每一局都能靠逻辑推到底。
+        </p>
+      </div>
+
+      <div class="menu-cols">
+        <div class="col">
+          <h3 class="col-title">选一档</h3>
+          <div id="tier-list" class="tiers"></div>
+          <div id="resume-card" class="resume" hidden>
+            <div class="resume-txt">
+              <strong id="resume-name">未完成的牌局</strong>
+              <span id="resume-meta"></span>
+            </div>
+            <button id="btn-resume" class="primary" type="button">继续</button>
+          </div>
+        </div>
+
+        <div class="col">
+          <h3 class="col-title">纪录（同档比：先看不求提示几次，再看步数，最后看时间）</h3>
+          <ul id="record-list" class="records"></ul>
+
+          <h3 class="col-title">你会用到的五条规则</h3>
+          <ol class="rules">
+            <li><b>线索自黑</b>：写着数字的那一格，自己就得染黑。</li>
+            <li><b>环上相容</b>：八格里已有的黑段必须能拼成那几组数字——拼不成的排法整条划掉。</li>
+            <li><b>二乘二禁</b>：任何二乘二里不能四格全黑，所以三格已黑时第四格必白。</li>
+            <li><b>白格连通</b>：白格是一整片，谁也不能被黑格围死在一角。</li>
+            <li><b>反证排除</b>：假定某一格是黑，若无论如何都推不出答案，它就只能白。</li>
+          </ol>
+          <p class="rules-note">五条都只读盘面自己的账：它们写下的每一格，在盘面的<b>每一个解</b>里都成立——
+            所以提示永远不需要猜。这两件事由 <code>node tools/engine-test.mjs</code> 与
+            <code>npm run balance</code> 在命令行里逐条断言。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-game" class="view" hidden>
+      <div class="stage">
+        <div class="stage-head">
+          <span id="stat-name" class="puzzle-name">—</span>
+          <span id="stat-tier" class="chip">—</span>
+          <span id="stat-time" class="chip mono">00:00</span>
+        </div>
+        <div id="board-wrap">
+          <canvas id="board" data-mode="black" role="img" aria-label="Tapa 棋盘：点击切换格子颜色，拖动连续染色"></canvas>
+          <div id="win-veil" hidden>
+            <div class="win-card">
+              <h3>每个数字都对上了</h3>
+              <p id="win-meta"></p>
+              <p id="win-record" class="win-record"></p>
+              <div class="win-actions">
+                <button id="btn-again" class="primary" type="button">再来一局</button>
+                <button id="btn-menu-2" class="ghost" type="button">回选档</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p id="state-line" class="conflict-line" aria-live="polite"></p>
+      </div>
+
+      <aside class="panel">
+        <div class="modes" role="group" aria-label="画笔颜色">
+          <button id="btn-mode-black" class="mode" type="button" aria-pressed="true" aria-label="画笔：把格子染黑">■ 黑</button>
+          <button id="btn-mode-white" class="mode" type="button" aria-pressed="false" aria-label="画笔：把格子染白">□ 白</button>
+          <button id="btn-mode-erase" class="mode" type="button" aria-pressed="false" aria-label="画笔：擦回未定">◌ 未定</button>
+        </div>
+        <div class="acts">
+          <button id="btn-hint" class="primary" type="button">提示<span class="mono" id="hint-count">0</span></button>
+          <button id="btn-undo" class="ghost" type="button">撤销</button>
+          <button id="btn-new" class="ghost" type="button">换一局</button>
+          <button id="btn-menu" class="ghost" type="button">回选档</button>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><span>步数</span><b id="stat-moves" class="mono">0</b></div>
+          <div class="stat"><span>提示</span><b id="stat-hints" class="mono">0</b></div>
+          <div class="stat"><span>已染黑</span><b id="stat-blacks" class="mono">0</b></div>
+          <div class="stat"><span>已判白</span><b id="stat-whites" class="mono">0</b></div>
+          <div class="stat"><span>待定</span><b id="stat-remaining" class="mono">0</b></div>
+          <div class="stat"><span>对上的数</span><b id="stat-satisfied" class="mono">0/0</b></div>
+          <div class="stat"><span>冲突</span><b id="stat-conflicts" class="mono">0</b></div>
+          <div class="stat"><span>难度实测</span><b id="stat-score" class="mono">—</b></div>
+        </div>
+
+        <div class="hint-box">
+          <h4 id="hint-rule">提示理由</h4>
+          <p id="hint-line">按 <b>提示</b> 会说出当前能推的一格，以及它依据哪条规则。</p>
+        </div>
+
+        <div class="legend">
+          <span><i class="sw sw-ink"></i>黑（墨水）</span>
+          <span><i class="sw sw-white"></i>白（判过没问题）</span>
+          <span><i class="sw sw-open"></i>还没定</span>
+          <span><i class="sw sw-zero"></i>0 0 0 的虚线环</span>
+          <span><i class="sw sw-done"></i>数字对上了的环</span>
+          <span><i class="sw sw-bad"></i>撞破规则</span>
+        </div>
+        <p class="keyhint"><b>点击</b> 未知→黑→白 轮转 · <b>拖动</b> 用画笔连续染 · <b>B</b> <b>W</b> <b>E</b> 换画笔 ·
+          <b>H</b> 提示 · <b>Z</b> 撤销 · <b>1–5</b> 选档</p>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>每局唯一解 · 每局可用逻辑推到底 · 提示只给推得出的一步 —— 难度分与档位区间都是
+      <code>npm run balance</code> 量出来的，不是形容词。</span>
+    <button id="btn-reset" class="link" type="button">清空存档</button>
+  </footer>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
