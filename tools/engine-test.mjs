@@ -646,5 +646,117 @@ for (const [label, board] of crossBoards) {
   eq('铅笔也推得完这一盘', solve(b).ok, true);
 }
 
+// ---------- 8. 存档形状：会抛错的 storage、脏数据、两个读者 -------------------
+// js/store.js is the one module in this repo whose normal environment (a browser that may refuse to
+// hand over localStorage, and a disk that may hold a save written by an older build) cannot be
+// reproduced by reading it. Each `?` suffix below is a *fresh instance* of the module: the save is
+// read at import time, so the environment has to be installed per import, not per call.
+{
+  const KEY = 'tapa.save.v1';
+  let map = new Map();
+  const working = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+  const install = (value) => Object.defineProperty(globalThis, 'localStorage', { value, configurable: true, writable: true });
+  const seal = (obj) => JSON.stringify(obj);
+  // Node 21+ ships a `localStorage` accessor that warns when no backing file was given; installing
+  // our own descriptor first keeps this file's output to its own assertions.
+  install(null);
+
+  // (a) the shape of the encoding itself: run-length over three wire values.
+  const bare = await import('../js/store.js?env=none');
+  install(working);
+  const S = bare.Store;
+  eq('存档只用一把 key', S._key, KEY);
+  eq('一整盘未定只编成一段', S._rle.encode(new Int8Array(121).fill(UNKNOWN)).length, 2);
+  eq('未定在线上是 0（所以未动过的盘只有一段）', S._rle.toWire(UNKNOWN), 0);
+  eq('黑在线上是 1', S._rle.toWire(BLACK), 1);
+  eq('白在线上是 2', S._rle.toWire(WHITE), 2);
+  eq('线上编码没有第四个值', [0, 1, 2].map((v) => S._rle.fromWire(v)).join(','), [UNKNOWN, BLACK, WHITE].join(','));
+  const mixed = new Int8Array(300).fill(UNKNOWN);
+  for (let i = 0; i < 260; i++) mixed[i] = i % 7 === 0 ? BLACK : WHITE; // a run past 255 must split
+  eq('来回一致（含跨 255 的长段）', S._rle.decode(S._rle.encode(mixed), mixed.length).join(','), mixed.join(','));
+  eq('截断的存档补成未定，而不是错位的盘', S._rle.decode([1, 3], 6).join(','), [BLACK, BLACK, BLACK, UNKNOWN, UNKNOWN, UNKNOWN].join(','));
+  eq('坏的一段被跳过，不吃掉后面的段', S._rle.decode([9, 3, 1, 2], 5).join(','), [BLACK, BLACK, UNKNOWN, UNKNOWN, UNKNOWN].join(','));
+
+  // (b) a working localStorage: write, re-read through a second instance, and they must agree.
+  S.saveResume({ originSeed: 'probe', tier: 2, w: 5, h: 5 }, mixed.slice(0, 25), 4200, { moves: 9, hints: 2 });
+  ok('落盘真的落了', map.has(KEY));
+  const again = (await import('../js/store.js?env=read')).Store;
+  eq('两个读者读到的档位一致', again.resume().tier, 2);
+  eq('两个读者读到的种子一致', again.resume().seed, 'probe');
+  eq('两个读者读到的耗时一致', again.resume().elapsedMs, 4200);
+  eq('两个读者读到的代价一致', `${again.resume().moves}/${again.resume().hints}`, '9/2');
+  eq('两个读者逐格一致', again.resumeBoard(25).join(','), Array.from(mixed.slice(0, 25)).join(','));
+  // A reset has to reach both copies, or a reload finds the run again.
+  again.reset();
+  ok('清空后盘面上没有存档了', !map.has(KEY));
+  eq('清空后内存里也没有', again.resume(), null);
+
+  // (c) size discipline: the run must never be replayed onto a board it does not fit.
+  map = new Map([[KEY, seal({ resume: { seed: 'x', tier: 0, elapsedMs: 1, cells: 676, ink: [1, 4], moves: 0, hints: 0, at: 0 } })]]);
+  const big = (await import('../js/store.js?env=big')).Store;
+  eq('尺寸对不上时 resume 仍然报得出原样', big.resume().board.length, 676);
+  eq('尺寸对不上时不许把这份墨涂到 5×5 上', big.resumeBoard(25), null);
+  eq('尺寸对得上时才认这份墨', big.resumeBoard(676).join(','), [BLACK, BLACK, BLACK, BLACK, ...new Array(672).fill(UNKNOWN)].join(','));
+
+  // (d) hostile payloads: an unreadable save is discarded, never half-trusted.
+  map = new Map([[KEY, '这根本不是 JSON']]);
+  const junk = (await import('../js/store.js?env=junk')).Store;
+  eq('读不懂的存档退回默认设置', junk.setting('sound'), true);
+  eq('读不懂的存档里没有牌局可继续', junk.resume(), null);
+
+  map = new Map([[KEY, seal({ resume: { seed: 'x', tier: 0, cells: 25, ink: '一整盘墨被写成了字符串' }, best: { newbie: 'nope' }, totals: { solved: -3, hints: 1, ms: 2 } })]]);
+  const dirty = (await import('../js/store.js?env=dirty')).Store;
+  eq('ink 不是数组的存档被丢掉', dirty.resume(), null);
+  eq('纪录值不是对象的条目被丢掉', dirty.best('newbie'), null);
+  eq('负数的总局数被清零', dirty.data.totals.solved, 0);
+
+  map = new Map([[KEY, seal({ settings: { sound: false, reduceMotion: true, 多出来的字段: '留着' }, best: { easy: { ms: 100, hints: 0, moves: 5, size: '6×6' } } })]]);
+  const goodSave = (await import('../js/store.js?env=good')).Store;
+  eq('读得懂的设置照单全收', goodSave.setting('sound'), false);
+  eq('读得懂的纪录照单全收', goodSave.best('easy').ms, 100);
+  // 先比提示次数：一个不求人的记录必须打得过更快但求过人的。
+  eq('纪录比的是先不求人', goodSave.recordBest('easy', { ms: 900, hints: 0, moves: 6, size: '6×6' }), false);
+  eq('更少提示破纪录', goodSave.recordBest('easy', { ms: 9000, hints: 0, moves: 1, size: '6×6' }), true);
+
+  // (e) private mode: Safari throws from the *getter*, so every access has to survive that.
+  map = new Map(); // an empty backing store: if anything is written, this stops being zero
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get() {
+      throw new Error('SecurityError: 隐私模式下 localStorage 不可访问');
+    },
+  });
+  let threw = null;
+  const shy = await import('../js/store.js?env=private').catch((e) => {
+    threw = e.message;
+    return null;
+  });
+  eq('隐私模式下这个模块连读档都不该抛错', threw, null);
+  eq('隐私模式下读出来是空档', shy.Store.resume(), null);
+  threw = null;
+  try {
+    shy.Store.saveResume({ originSeed: 'p', tier: 0, w: 5, h: 5 }, new Int8Array(25).fill(UNKNOWN), 1, { moves: 1, hints: 0 });
+    shy.Store.setSetting('sound', false);
+  } catch (e) {
+    threw = e.message;
+  }
+  eq('隐私模式下写存档不抛错', threw, null);
+  eq('隐私模式下这一局内存里还是记住了', shy.Store.resume() !== null, true);
+  eq('隐私模式下设置也当场生效', shy.Store.setting('sound'), false);
+  threw = null;
+  try {
+    shy.Store.reset();
+  } catch (e) {
+    threw = e.message;
+  }
+  eq('隐私模式下清空存档同样不抛错', threw, null);
+  eq('抛错的那个 localStorage 一次也没被写穿过', map.size, 0);
+  install(working);
+}
+
 console.log(`\n${pass} 条断言通过 / ${fail} 条失败`);
 process.exit(fail ? 1 : 0);
