@@ -923,7 +923,8 @@
     eq('满盘皆黑时一条数字都没对上', g2.state().satisfied, 0);
     // js/main.js:128-132 keeps two sentences for the state line: the 矛盾 one (no completion exists)
     // and `${problems} 处对不上` for "wrong but not yet dead". Measured over every one- and two-cell
-    // write on all five shipped boards (53,048 states) plus 4,000 random partial fillings, a visible
+    // write on all five shipped boards (51,048 states: 2·n singles + 4·C(n,2) doubles per board, so
+    // 1,250 / 3,842 / 8,644 / 21,766 / 51,048 cumulative) plus 4,000 random partial fillings, a visible
     // fault *always* comes with a contradiction — verify() and the cheap sweep never disagree — so the
     // 处数 sentence is text this game can currently never show. The count reaches the player through
     // #stat-conflicts only; that is asserted above, and below we pin that the unreachable sentence

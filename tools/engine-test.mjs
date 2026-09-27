@@ -324,7 +324,6 @@ eq('环上八格写 1 八种（黑格在哪个方位都行）', pcount([1], 8), 
 eq('环上八格写 7 八种（白格在哪个方位都行）', pcount([7], 8), 8);
 eq('环上八格写 4 八种（四连黑有八个起点）', pcount([4], 8), 8);
 eq('环上八格写 1 1 二十种（C(8,2) 减掉相邻的 8 对）', pcount([1, 1], 8), 20);
-eq('环上八格写 1 1 二十种（C(8,2) 减掉相邻的 8 对）', pcount([1, 1], 8), 20);
 eq('环上八格写 2 2 十二种（骨牌 8 处 × 隔开的 3 处 ÷ 2）', pcount([2, 2], 8), 12);
 eq('环上八格写 1 1 1 十六种（环形三子不邻：8×6÷3）', pcount([1, 1, 1], 8), 16);
 // Asymmetric clues cannot be counted without deciding where north is, which IS the point of the
