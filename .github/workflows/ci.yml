@@ -49,3 +49,51 @@ jobs:
 
       - name: Entry files exist
         run: test -f index.html && grep -q '<canvas' index.html && grep -q 'js/main.js' index.html
+
+  # The README/DESIGN promises ("每局唯一解""难度是量出来的""存档写不进 hostile 盘") are held by
+  # browser assertions in tools/scenarios.js, and until this job existed those assertions ran only on
+  # the machine that wrote them. `check` going green said nothing about the page.
+  browser:
+    name: real browser gate (both URL shapes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 22, not the 20 the check job uses: tools/playtest.cjs is a raw CDP driver written against
+      # Node's global WebSocket/fetch, which only exist from 22 on. On 20 the very first attach dies
+      # with "WebSocket is not defined" and the job goes red before a single assertion runs — the
+      # sibling repo loshu learned this by having a locally-green harness fail only on the runner.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Root shape: server.cjs makes the repo the document root, which is the only shape a local
+      # machine ever sees. verify.sh refuses to run on ports it did not bind, and a scenario that
+      # returns NO RESULT or asserts nothing exits non-zero, so a silently dead harness cannot read
+      # green here.
+      - name: Browser gate, root shape
+        env:
+          WD_TIMEOUT: 900
+        run: bash tools/verify.sh
+
+      # Prefix shape: Pages actually serves this repo under a path segment
+      # (https://z-biz-game.github.io/z-biz-game-tapa-cos/). A root-shaped server cannot tell a
+      # leading-slash import from a relative one — that blind spot is why the `save` scenario's
+      # `import('/js/store.js')` 404ed on the deployed site while the local gate stayed green,
+      # leaving 19 assertions that never ran. So the prefix pass is part of the gate, not a footnote.
+      - name: Browser gate, prefix shape (how Pages serves us)
+        env:
+          WD_TIMEOUT: 900
+        run: |
+          root=$(mktemp -d)
+          ln -s "$GITHUB_WORKSPACE" "$root/z-biz-game-tapa-cos"
+          python3 -m http.server 5392 --bind 127.0.0.1 --directory "$root" &
+          SERVER=$!
+          trap 'kill $SERVER 2>/dev/null' EXIT
+          for i in $(seq 1 40); do
+            curl -fsS -m 2 "http://127.0.0.1:5392/z-biz-game-tapa-cos/" >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          curl -fsS -m 3 "http://127.0.0.1:5392/z-biz-game-tapa-cos/js/main.js" >/dev/null
+          curl -fsS -m 3 "http://127.0.0.1:5392/z-biz-game-tapa-cos/js/engine/tapa.js" >/dev/null
+          BASE_URL=http://127.0.0.1:5392/z-biz-game-tapa-cos/ bash tools/verify.sh
+

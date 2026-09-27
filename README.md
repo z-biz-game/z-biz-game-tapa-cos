@@ -215,7 +215,11 @@ npm run verify             # 真实 headless Chrome：11 个场景 / 476 条断�
   不读内部标志位。`verify.sh` 有 pre-flight：先 `curl` 首页、再 `grep tapa`，证明 5312 上服务的是本作，
   并且**端口被人占着就直接退出**（`tools/verify.sh:38-50`）；一个场景若一条断言都没跑，判失败。
 - CI（`.github/workflows/ci.yml`）跑 check / 引擎测试 / `balance`(SAMPLES=24) / `bake --check` / 入口文件，
-  **不 `npm install`**：零运行时依赖、零构建步骤。浏览器门禁不进 CI（要本机 Chrome）。
+  **不 `npm install`**：零运行时依赖、零构建步骤。浏览器门禁也进 CI：`browser` job 把上面那 476 条
+  跑两遍——root 形态（`server.cjs` 把仓库当文档根）与 Pages 真实形态（仓库挂在 `/<repo>/` 一段下）。
+  两形各跑一遍不是讲究对称：本地根路径那次 11 个场景全绿，而 Pages 前缀下 `save` 场景的探针
+  import 写的是斜杠开头（origin 根），404 之后整个场景一条断言都没跑，只留下 `NO RESULT`。`node-version: 22` 是被
+  `tools/playtest.cjs` 钉的——它用 22+ 才有的全局 `WebSocket`/`fetch`，在 20 上第一条 attach 就死。
 
 ---
 
