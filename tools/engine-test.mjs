@@ -646,6 +646,59 @@ for (const [label, board] of crossBoards) {
   eq('铅笔也推得完这一盘', solve(b).ok, true);
 }
 
+// ---------- 7b. 剪枝只拒绝分支，不写格子：与小盘全枚举逐盘对数 ----------------
+// `extensible` and `whitesStillLinked` cut the walk down from "unaffordable" to "finished", and a prune
+// that dropped a *real* colouring would be the worst possible bug in this file: it would report
+// `unique` for an ambiguous board, which is the one claim the repo sells. So the count is re-read
+// against a third implementation that shares nothing with either of the other two — enumerate all
+// 2^(w·h) colourings and keep the ones `verify()` accepts. Small boards only, since that is where a
+// full enumeration is affordable; the big boards are covered by the two directions above.
+{
+  const w = 4;
+  const h = 4;
+  const brute = (board) => {
+    const n = w * h;
+    let total = 0;
+    for (let mask = 0; mask < (1 << n); mask++) {
+      const cells = new Int8Array(n);
+      for (let i = 0; i < n; i++) cells[i] = (mask >> i) & 1 ? BLACK : WHITE;
+      if (verify(board, cells).length === 0) total++;
+    }
+    return total;
+  };
+  // 12 hand-built clue sets, mixed on purpose: some unique, some ambiguous, some unsatisfiable.
+  const fixtures = [
+    Array.from(fromPicture(['.#..', '.##.', '...#', '..##']).clue),
+    Array.from({ length: 16 }, (_, i) => (i === 5 ? encodeClue(1) : NO_CLUE)),
+    Array.from({ length: 16 }, () => 0),
+    Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 0 : NO_CLUE)),
+    Array.from(cluesFrom(4, 4, Int8Array.from([1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1]))),
+    Array.from(cluesFrom(4, 4, Int8Array.from([0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0]))),
+    Array.from(cluesFrom(4, 4, Int8Array.from([1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1]))),
+    Array.from({ length: 16 }, (_, i) => (i === 0 ? encodeClue(1, 1, 1) : NO_CLUE)),
+    Array.from({ length: 16 }, (_, i) => (i < 4 ? encodeClue(2) : NO_CLUE)),
+    Array.from(cluesFrom(4, 4, new Int8Array(16).fill(BLACK)).map((v, i) => (i % 3 ? v : NO_CLUE))),
+    Array.from(cluesFrom(4, 4, Int8Array.from([1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]))),
+    Array.from({ length: 16 }, (_, i) => (i === 6 ? encodeClue(3, 1) : i === 9 ? 0 : NO_CLUE)),
+  ];
+  let agree = 0;
+  let walked = 0;
+  const seenCounts = new Set();
+  for (let k = 0; k < fixtures.length; k++) {
+    const board = createBoard(w, h, Int16Array.from(fixtures[k]));
+    const ref = brute(board);
+    seenCounts.add(ref === 1 ? 'unique' : ref === 0 ? 'none' : 'many');
+    const a = analyze(board, { limit: 1 << 20, maxNodes: 2000000 });
+    if (a.exhaustive) walked++;
+    if (a.exhaustive && a.count === ref) agree++;
+    eq(`7b 盘 ${k}：走完了穷举`, a.exhaustive, true);
+    eq(`7b 盘 ${k}：解数与 2^16 全枚举相同`, a.count, ref);
+  }
+  eq('与小盘全枚举逐盘对数：12 盘全对', agree, 12);
+  eq('12 盘都是走穷了的', walked, 12);
+  ok('对照组不是空的（唯一/多解/无解都出现了）', seenCounts.size === 3, [...seenCounts].join(','));
+}
+
 // ---------- 8. 存档形状：会抛错的 storage、脏数据、两个读者 -------------------
 // js/store.js is the one module in this repo whose normal environment (a browser that may refuse to
 // hand over localStorage, and a disk that may hold a save written by an older build) cannot be

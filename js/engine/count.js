@@ -16,6 +16,23 @@
 // Cost: exponential, pruned only by locally decidable facts. That is fine because it is only ever
 // asked about a *finished* puzzle (a few thousand boards in tools/balance.mjs, one board per hint
 // audit), never about the thousands of half-deleted candidates the generator throws away.
+//
+// What "locally decidable" is allowed to mean here, stated exactly, because the walk's whole value is
+// that it never *deduces* a cell — it only refuses a branch:
+//   1. the colour a clue demands of its own cell;
+//   2. a 2×2 that just closed all black;
+//   3. a clue whose ring, read with its undecided cells left open, has **no** completion that matches
+//      its numbers (`extensible`). Checking only "is the finished ring right?" leaves a branch open
+//      until its last ring cell lands, and on an 11×11 with 22 clues that is where the walk used to
+//      run out of nodes;
+//   4. the whites already painted, which must still be able to reach each other through the cells that
+//      are white-or-undecided (`whitesStillLinked`). A half-filled board may look temporarily cut off
+//      — it may not be cut off *for good*.
+// Each of those four answers the same question for one branch: "can this partial colouring still be
+// completed into a legal board?". A branch that answers no is dropped; nothing is ever written to a
+// cell that the walk had not already tried both colours of. That is what keeps the count a count, and
+// it is checked as such in tools/engine-test.mjs §7b, where the walk's answer for every 3×3 and 4×4
+// clue set is compared against the 2^(w·h) colourings listed by a third, independent enumerator.
 
 const UNDECIDED = -1;
 const BLANK = -1; // "no clue here", same wire format as the engine, re-derived rather than imported
@@ -25,6 +42,9 @@ const BLANK = -1; // "no clue here", same wire format as the engine, re-derived 
 // Clockwise from north, in-bound only. Written out as its own table on purpose: if the solver's ring
 // order and this one ever disagree, the two agree on nothing and the cross-check goes red.
 const OFFSETS = [[-1, 0], [-1, 1], [0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1]];
+
+// 4-connected, the only adjacency the "all whites in one piece" rule speaks of.
+const FOUR = [[-1, 0], [0, 1], [1, 0], [0, -1]];
 
 function neighboursOf(w, h, i) {
   const r = Math.floor(i / w);
@@ -76,15 +96,18 @@ function sameRuns(a, b) {
   return true;
 }
 
+// 3^8, indexed by the ternary reading of a ring (0 white / 1 black / 2 undecided per slot, in ring
+// order). Used as the memo key of `extensible` below.
+const POW3 = [1, 3, 9, 27, 81, 243, 729, 2187, 6561];
+
 // ---- the exhaustive walk -----------------------------------------------------
 
 // Cell order: row-major, left to right, top to bottom. Chosen for predictability rather than speed —
 // the point of this file is that nobody has to reason about its search order to trust a count.
 //
-// Pruning is limited to what is decidable from the cells assigned so far, all of it re-derived from
-// the rules text: a clue cell's own colour, a completed 2×2, and a clue whose ring is now fully
-// assigned. White connectivity is checked only at the leaves, because a half-filled board is allowed
-// to look temporarily cut off.
+// Pruning is the four local tests spelled out at the top of this file, all of them re-derived from the
+// rules text and none of them writing a cell: a clue's own colour, a 2×2 that closed, a clue ring that
+// has no matching completion left, and whites that have been cut apart for good.
 export function analyze(shape, { limit = 2, maxNodes = 400000 } = {}) {
   const w = shape.w;
   const h = shape.h;
@@ -121,6 +144,32 @@ export function analyze(shape, { limit = 2, maxNodes = 400000 } = {}) {
     blocks.push([i - w - 1, i - w, i - 1, i]);
   }
 
+  // Every bit pattern this clue's ring may wear, listed once by trying all 2^ring of them through the
+  // same `runsOf` this file uses at the leaves. `extensible` then asks "could the undecided slots still
+  // be filled in to land on one of these?" — a question about the clue's own ring, answered by
+  // enumeration rather than by any rule about how to solve Tapa.
+  const accepted = [];
+  const ternary = [];
+  for (let i = 0; i < n; i++) {
+    if (!digitList[i]) {
+      accepted.push(null);
+      ternary.push(null);
+      continue;
+    }
+    const m = nbs[i].length;
+    const want = digitList[i].filter((d) => d > 0);
+    const flags = new Array(m);
+    const ok = new Uint8Array(1 << m);
+    for (let mask = 0; mask < (1 << m); mask++) {
+      for (let s = 0; s < m; s++) flags[s] = ((mask >> s) & 1) === 1;
+      if (sameRuns(runsOf(flags, m === 8), want)) ok[mask] = 1;
+    }
+    accepted.push(ok);
+    // 0 = not asked yet, 1 = still extensible, 2 = dead. Keyed by the ternary reading of the ring, so
+    // the same half-coloured ring seen down a different branch costs one array read.
+    ternary.push(new Uint8Array(POW3[m]));
+  }
+
   const value = Array.from({ length: n }, () => UNDECIDED);
   const solutions = [];
   let count = 0;
@@ -133,11 +182,69 @@ export function analyze(shape, { limit = 2, maxNodes = 400000 } = {}) {
   let exhaustive = true;
   let budget = false;
 
-  function clueReady(i) {
+  // Is there any way to colour this clue's still-undecided ring cells so the ring reads exactly as the
+  // clue says? False means the branch is dead; true means nothing except "not dead yet".
+  function extensible(i) {
     const ring = nbs[i];
-    for (const c of ring) if (value[c] === UNDECIDED) return false;
-    const flags = ring.map((c) => value[c] === 1);
-    return sameRuns(runsOf(flags, ring.length === 8), digitList[i].filter((d) => d > 0));
+    const m = ring.length;
+    const memo = ternary[i];
+    let mask = 0;
+    let unknown = 0;
+    let key = 0;
+    for (let s = 0; s < m; s++) {
+      const v = value[ring[s]];
+      if (v === 1) mask |= 1 << s;
+      if (v === UNDECIDED) unknown |= 1 << s;
+      key += (v === UNDECIDED ? 2 : v) * POW3[s];
+    }
+    const seen = memo[key];
+    if (seen) return seen === 1;
+    const set = accepted[i];
+    let alive = false;
+    for (let sub = unknown; ; sub = (sub - 1) & unknown) {
+      if (set[mask | sub]) {
+        alive = true;
+        break;
+      }
+      if (sub === 0) break;
+    }
+    memo[key] = alive ? 1 : 2;
+    return alive;
+  }
+
+  // The painted whites must still be one piece — where a path may run through any cell that is not
+  // already black. Checked after every assignment, because painting a cell black is exactly the move
+  // that can close the last door between two white halves.
+  function whitesStillLinked() {
+    let total = 0;
+    let start = -1;
+    for (let i = 0; i < n; i++) {
+      if (value[i] === 0) {
+        total++;
+        if (start < 0) start = i;
+      }
+    }
+    if (total <= 1) return true;
+    const seen = new Uint8Array(n);
+    const stack = [start];
+    seen[start] = 1;
+    let reached = 1;
+    while (stack.length) {
+      const c = stack.pop();
+      const r = Math.floor(c / w);
+      const cc = c % w;
+      for (const [dr, dc] of FOUR) {
+        const rr = r + dr;
+        const c2 = cc + dc;
+        if (rr < 0 || c2 < 0 || rr >= h || c2 >= w) continue;
+        const nb = rr * w + c2;
+        if (value[nb] === 1 || seen[nb]) continue;
+        seen[nb] = 1;
+        if (value[nb] === 0) reached++;
+        stack.push(nb);
+      }
+    }
+    return reached === total;
   }
 
   function okAfterAssign(i) {
@@ -145,19 +252,17 @@ export function analyze(shape, { limit = 2, maxNodes = 400000 } = {}) {
     if (want !== null && (value[i] === 1) !== want) return false;
     const b = blocks[i];
     if (b && value[b[0]] === 1 && value[b[1]] === 1 && value[b[2]] === 1 && value[b[3]] === 1) return false;
-    // Every clue that lost its last undecided ring cell must read correctly now, and no clue may
-    // already show more blacks than it asks for.
+    // No clue may already show more blacks than it asks for, and none may have run out of ways to
+    // read correctly. `extensible` covers the finished-ring case on its own (an all-decided ring is
+    // looked up in the very table the leaf check uses), so there is one spelling of that rule here.
     for (const cl of ringOf[i]) {
       let sum = 0;
-      let open = 0;
-      for (const c of nbs[cl]) {
-        if (value[c] === UNDECIDED) open++;
-        else if (value[c] === 1) sum++;
-      }
+      for (const c of nbs[cl]) if (value[c] === 1) sum++;
       const d = digitList[cl];
       if (sum > d[0] + d[1] + d[2]) return false;
-      if (!open && !clueReady(cl)) return false;
+      if (!extensible(cl)) return false;
     }
+    if (!whitesStillLinked()) return false;
     return true;
   }
 

@@ -131,15 +131,29 @@ console.log(`  ${derivable}/${derivable + stalled} 张盘从空盘推到满盘�
 // 唯一解, independently: the exhaustive counter shares no ring table and no rule with the solver, so
 // "unique" is a second opinion rather than the same opinion twice. Large boards are capped by the
 // walk's own node budget and reported as skipped, never as passing.
-console.log('\n== 唯一解：穷举计数器独立复核（不共享规则表，也不共享环表）==');
+// `CROSS_NODES` is the same budget tools/bake.mjs ships against, and a board that runs out of it is
+// counted as a *failure* below rather than as a skip: "the counter agreed on every board it had time
+// for" is not the promise this repo makes. The cost of each tier's walk is printed next to the verdict
+// so the margin is on the page (see DESIGN §5a for what it used to be).
+const CROSS_NODES = Number(process.env.CROSS_NODES || 500000);
+console.log(`\n== 唯一解：穷举计数器独立复核（不共享规则表，也不共享环表；预算 ${CROSS_NODES} 节点）==`);
 let crossChecked = 0;
 let crossBad = 0;
 let crossSkipped = 0;
+const crossCost = [];
 for (let t = 0; t < TIERS.length; t++) {
+  let slow = 0;
+  let deep = 0;
+  let over = 0;
   for (let s = 0; s < 3; s++) {
     const g = generate(`cross|${t}|${s}`, t, { tries: 400 });
     if (!g) continue;
-    const a = analyze(g.board, { limit: 2, maxNodes: 400000 });
+    const c0 = performance.now();
+    const a = analyze(g.board, { limit: 2, maxNodes: CROSS_NODES });
+    const cms = performance.now() - c0;
+    slow = Math.max(slow, cms);
+    deep = Math.max(deep, a.nodes);
+    if (!a.exhaustive) over++;
     if (!a.exhaustive && a.code === 'many') {
       // The walk gave up having found a second colouring: that is a *failure* of the promise, not a
       // budget skip.
@@ -149,6 +163,8 @@ for (let t = 0; t < TIERS.length; t++) {
     }
     if (!a.exhaustive) {
       crossSkipped++;
+      crossBad++;
+      console.log(`  ✗ ${TIERS[t].name} seed ${s}: 穷举在 ${CROSS_NODES} 节点内没走完，唯一解没证完`);
       continue;
     }
     crossChecked++;
@@ -163,8 +179,13 @@ for (let t = 0; t < TIERS.length; t++) {
       console.log(`  ✗ ${TIERS[t].name} seed ${s}: 两套实现给出的不是同一盘答案`);
     }
   }
+  crossCost.push(`${TIERS[t].name} 最慢 ${slow.toFixed(1)} ms / 最深 ${deep} 节点 / 超预算 ${over}`);
 }
-console.log(`  ${crossChecked - crossBad}/${crossChecked} 局穷举复核与铅笔判定逐格一致${crossSkipped ? `，另有 ${crossSkipped} 局超预算未核` : ''}`);
+console.log(`  穷举耗时逐档：${crossCost.join(' · ')}`);
+console.log(
+  `  ${crossChecked - crossBad}/${crossChecked} 局穷举复核与铅笔判定逐格一致` +
+    (crossSkipped ? `，另有 ${crossSkipped} 局超预算未核（记为不成立）` : '，超预算 0 局')
+);
 
 // The answer the generator planted must be *the* answer the acceptance checks agree on. If it were
 // not, every score above would be measuring a board nobody can actually win. Note this re-runs the

@@ -15,11 +15,16 @@
 // Every row passes, in this order, before it is written:
 //   1. the generator accepts the board (an answer exists, the pencil path finishes the clue set);
 //   2. the derived answer *is* the planted answer, cell by cell;
-//   3. the independent exhaustive counter (js/engine/count.js, sharing no rule table) reports
-//      exactly one solution — or the row is labelled `budget`, never quietly kept;
+//   3. the independent exhaustive counter (js/engine/count.js, sharing no rule table) walked the whole
+//      space inside its node budget and reported exactly one solution — a board it cannot afford to
+//      finish is a broken promise, so it stops the bake (`proof: "budget"` never reaches the library);
 //   4. the measured score still sits inside the tier's band;
 //   5. the clue set is not a duplicate of a row already in the campaign.
+//
+// The per-tier line prints what step 3 actually cost (slowest board, deepest node count), because
+// "6/6 在预算内证完" is only worth reading if the budget it fit into is on the page next to it.
 
+import { performance } from 'node:perf_hooks';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,8 +36,10 @@ import { analyze } from '../js/engine/count.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = join(here, '..', 'js', 'data', 'library.js');
 const PER_TIER = Number(process.env.PER_TIER || 6);
-// The exhaustive walk is exponential; large boards are given a node budget and reported honestly when
-// they run out rather than being dropped from the campaign.
+// The exhaustive walk is exponential. This is the node budget one board is allowed to spend. Measured
+// on the 30 rows this file bakes (2026-09-27, `node tools/bake.mjs`): deepest 79 444 nodes, on the
+// 11×11 master tier, i.e. ~6× headroom below the budget here — and a board that ever needs more stops
+// the bake instead of shipping a row whose uniqueness nobody finished proving.
 const MAX_NODES = Number(process.env.MAX_NODES || 500000);
 const CHECK = process.argv.includes('--check');
 
@@ -68,8 +75,9 @@ function textOf(rows) {
 //
 // Per row: \`proof\` is how the *independent* exhaustive counter (js/engine/count.js, which
 // shares no rule table with the solver) judged the board — "unique" means it walked the whole
-// space and found exactly one colouring; "budget" means the walk ran out of nodes on a board
-// this big and only the pencil path vouches for it.
+// space and found exactly one colouring. A board the walk could not finish inside the node budget
+// is refused by \`node tools/bake.mjs\` rather than written with \`proof:"budget"\`: this file only
+// ever contains rows whose single solution has actually been enumerated.
 
 /** @type {{no:string,tier:string,seed:string,w:number,h:number,score:number,steps:number,rounds:number,elim:number,clues:number,zeroClues:number,nishio:number,proof:string}[]} */
 export const LIBRARY = [
@@ -90,11 +98,15 @@ export const describeRow = (p) =>
 const rows = [];
 const problems = [];
 const seen = new Set();
+const stats = new Map();
 
 for (const tier of TIERS) {
   const ti = TIERS.indexOf(tier);
   let written = 0;
   let tried = 0;
+  let slowMs = 0;
+  let deepNodes = 0;
+  let sumMs = 0;
   const cap = PER_TIER * 40;
   while (written < PER_TIER && tried < cap) {
     const seed = `tapa-campaign-${tier.key}-${tried}`;
@@ -114,19 +126,30 @@ for (const tier of TIERS) {
       problems.push(`${seed}: 推出的答案不是种下的那一个`);
       continue;
     }
-    // Promise 3: a second, independent opinion about the solution count.
+    // Promise 3: a second, independent opinion about the solution count — and the opinion has to be a
+    // *finished* one. An unfinished walk is not a weaker proof of the same claim, it is a different
+    // claim ("no second colouring turned up yet"), so the seed is refused here and the campaign simply
+    // goes on to the next one. A tier that cannot fill 6 rows inside the budget fails loudly below,
+    // instead of shipping a `proof:"budget"` row whose uniqueness only the pencil path vouches for.
+    const t0 = performance.now();
     const a = analyze(g.board, { limit: 2, maxNodes: MAX_NODES });
-    let proof = 'unique';
+    const ms = performance.now() - t0;
+    sumMs += ms;
+    if (ms > slowMs) slowMs = ms;
+    if (a.nodes > deepNodes) deepNodes = a.nodes;
     if (a.code === 'many' || a.code === 'none') {
       problems.push(`${seed}: 穷举计数器说解数是 ${a.code === 'none' ? '零' : a.count}，铅笔路却说推得完`);
       continue;
     }
-    if (!a.exhaustive) proof = 'budget';
-    if (a.exhaustive && a.code !== 'unique') {
+    if (!a.exhaustive) {
+      problems.push(`${seed}: 穷举在 ${MAX_NODES} 节点预算内没走完，这一局的唯一解没有证完`);
+      continue;
+    }
+    if (a.code !== 'unique') {
       problems.push(`${seed}: 穷举解数 ${a.count}`);
       continue;
     }
-    if (a.exhaustive && !a.solutions[0].every((v, i) => v === g.solution[i])) {
+    if (!a.solutions[0].every((v, i) => v === g.solution[i])) {
       problems.push(`${seed}: 两套实现给出的不是同一盘答案`);
       continue;
     }
@@ -143,11 +166,25 @@ for (const tier of TIERS) {
     }
     seen.add(sig);
     written++;
-    rows.push(rowOf(g, tier, `${tier.key}-${String(written).padStart(2, '0')}`, proof));
+    rows.push(rowOf(g, tier, `${tier.key}-${String(written).padStart(2, '0')}`, 'unique'));
   }
+  stats.set(tier.key, { slowMs, deepNodes, sumMs });
   const proofs = rows.filter((x) => x.tier === tier.key).map((x) => x.proof);
+  const st = stats.get(tier.key);
   console.log(
-    `${tier.name} ${tier.key}: 烘焙 ${written}/${PER_TIER}（试 ${tried} 个种子），解数复核 穷举 ${proofs.filter((p) => p === 'unique').length} · 超预算 ${proofs.filter((p) => p === 'budget').length}`
+    `${tier.name} ${tier.key}: 烘焙 ${written}/${PER_TIER}（试 ${tried} 个种子），解数复核 穷举 ${proofs.filter((p) => p === 'unique').length} · 超预算 ${proofs.filter((p) => p === 'budget').length}` +
+      ` · 穷举实测 最慢 ${st.slowMs.toFixed(1)} ms / 最深 ${st.deepNodes} 节点 / ${proofs.length} 局共 ${st.sumMs.toFixed(0)} ms（预算 ${MAX_NODES}）`
+  );
+}
+
+// The headline the campaign promises: not "the counter agreed on the boards it had time for", but every
+// row enumerated to the end. Anything else prints the offenders and leaves by the non-zero door.
+const budgeted = rows.filter((r) => r.proof !== 'unique');
+if (rows.length && !budgeted.length) {
+  const slow = TIERS.map((t) => ({ t, s: stats.get(t.key) })).sort((a, b) => b.s.slowMs - a.s.slowMs)[0];
+  console.log(
+    `\n解数复核：${rows.length}/${rows.length} 局全部在 ${MAX_NODES} 节点预算内被穷举证完唯一解` +
+      `（最慢 ${slow.t.name} ${slow.t.size.join('×')}：一局 ${slow.s.slowMs.toFixed(1)} ms、最深 ${slow.s.deepNodes} 节点）`
   );
 }
 
@@ -162,6 +199,10 @@ if (CHECK) {
   }
   if (disk === null) {
     console.error('\n✗ js/data/library.js 不存在：先跑 `node tools/bake.mjs`');
+    process.exit(1);
+  }
+  if (budgeted.length) {
+    console.error(`\n✗ 题单里有 ${budgeted.length} 局的唯一解没被穷举证完：${budgeted.map((r) => `${r.no}(${r.proof})`).join(' ')}`);
     process.exit(1);
   }
   if (problems.length) {
@@ -187,6 +228,10 @@ if (CHECK) {
 if (problems.length) {
   console.warn(`\n有 ${problems.length} 个种子没过复验（跳过，不写进题单）：`);
   for (const p of problems.slice(0, 12)) console.warn('  · ' + p);
+}
+if (budgeted.length) {
+  console.error(`\n✗ ${budgeted.length} 局的唯一解没证完，拒绝写 js/data/library.js`);
+  process.exit(1);
 }
 writeFileSync(OUT, text);
 console.log(`\n写入 js/data/library.js：${rows.length} 局。复验：node tools/bake.mjs --check`);

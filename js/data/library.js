@@ -6,8 +6,9 @@
 //
 // Per row: `proof` is how the *independent* exhaustive counter (js/engine/count.js, which
 // shares no rule table with the solver) judged the board — "unique" means it walked the whole
-// space and found exactly one colouring; "budget" means the walk ran out of nodes on a board
-// this big and only the pencil path vouches for it.
+// space and found exactly one colouring. A board the walk could not finish inside the node budget
+// is refused by `node tools/bake.mjs` rather than written with `proof:"budget"`: this file only
+// ever contains rows whose single solution has actually been enumerated.
 
 /** @type {{no:string,tier:string,seed:string,w:number,h:number,score:number,steps:number,rounds:number,elim:number,clues:number,zeroClues:number,nishio:number,proof:string}[]} */
 export const LIBRARY = [
@@ -35,12 +36,12 @@ export const LIBRARY = [
   {no:"hard-04",tier:"hard",seed:"tapa-campaign-hard-3",w:9,h:9,score:160.1,steps:81,rounds:4,elim:19.65,clues:16,zeroClues:2,nishio:23,proof:"unique"},
   {no:"hard-05",tier:"hard",seed:"tapa-campaign-hard-4",w:9,h:9,score:165.3,steps:81,rounds:3,elim:20.72,clues:17,zeroClues:2,nishio:26,proof:"unique"},
   {no:"hard-06",tier:"hard",seed:"tapa-campaign-hard-5",w:9,h:9,score:132.6,steps:81,rounds:4,elim:30.41,clues:20,zeroClues:5,nishio:0,proof:"unique"},
-  {no:"master-01",tier:"master",seed:"tapa-campaign-master-0",w:11,h:11,score:234.2,steps:121,rounds:6,elim:59.85,clues:27,zeroClues:1,nishio:0,proof:"budget"},
-  {no:"master-02",tier:"master",seed:"tapa-campaign-master-1",w:11,h:11,score:242.1,steps:121,rounds:7,elim:42.62,clues:24,zeroClues:2,nishio:19,proof:"budget"},
+  {no:"master-01",tier:"master",seed:"tapa-campaign-master-0",w:11,h:11,score:234.2,steps:121,rounds:6,elim:59.85,clues:27,zeroClues:1,nishio:0,proof:"unique"},
+  {no:"master-02",tier:"master",seed:"tapa-campaign-master-1",w:11,h:11,score:242.1,steps:121,rounds:7,elim:42.62,clues:24,zeroClues:2,nishio:19,proof:"unique"},
   {no:"master-03",tier:"master",seed:"tapa-campaign-master-2",w:11,h:11,score:215.8,steps:121,rounds:2,elim:61.99,clues:30,zeroClues:4,nishio:0,proof:"unique"},
   {no:"master-04",tier:"master",seed:"tapa-campaign-master-3",w:11,h:11,score:256,steps:121,rounds:3,elim:51.34,clues:27,zeroClues:1,nishio:26,proof:"unique"},
-  {no:"master-05",tier:"master",seed:"tapa-campaign-master-4",w:11,h:11,score:237.7,steps:121,rounds:7,elim:49.78,clues:28,zeroClues:3,nishio:18,proof:"budget"},
-  {no:"master-06",tier:"master",seed:"tapa-campaign-master-5",w:11,h:11,score:241.2,steps:121,rounds:5,elim:37.09,clues:22,zeroClues:2,nishio:23,proof:"budget"},
+  {no:"master-05",tier:"master",seed:"tapa-campaign-master-4",w:11,h:11,score:237.7,steps:121,rounds:7,elim:49.78,clues:28,zeroClues:3,nishio:18,proof:"unique"},
+  {no:"master-06",tier:"master",seed:"tapa-campaign-master-5",w:11,h:11,score:241.2,steps:121,rounds:5,elim:37.09,clues:22,zeroClues:2,nishio:23,proof:"unique"},
 ];
 
 export const TIERS_ORDERED = ["newbie","easy","medium","hard","master"];
