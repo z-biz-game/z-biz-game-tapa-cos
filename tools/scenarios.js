@@ -1042,14 +1042,19 @@
     const keep = localStorage.getItem('tapa.save.v1');
     const junk = ['{', '[]', 'null', '"x"', '0', JSON.stringify({ resume: { cells: 0, ink: [1, 2], tier: 3 } }), JSON.stringify({ resume: { cells: 49, ink: 'ink', tier: 3 } }), JSON.stringify({ best: { medium: { ms: 'soon' } }, settings: 7 })];
     let survived = 0;
+    // These three imports re-fetch store.js with a cache-busting query on purpose, so the URL has to
+    // be built the same way the shipped page builds its own: `document.baseURI` carries Pages'
+    // `/<repo>/` prefix, and a leading `/js/...` would resolve above it (404 on the deployed site,
+    // green locally — which is the worst kind of pass).
+    const storeUrl = (q) => `${new URL('js/store.js', document.baseURI).href}?${q}`;
     for (let k = 0; k < junk.length; k++) {
       localStorage.setItem('tapa.save.v1', junk[k]);
-      const F = (await import(`/js/store.js?hostile=${k}&n=${Date.now()}`)).Store;
+      const F = (await import(storeUrl(`hostile=${k}&n=${Date.now()}`))).Store;
       if (F.resume() === null && Object.keys(F.data.best).length === 0 && F.setting('sound') === true && F.data.totals.solved === 0 && F.setting('reduceMotion') === false) survived++;
     }
     eq('八种坏存档一律整份丢弃', survived, junk.length);
     localStorage.setItem('tapa.save.v1', JSON.stringify({ resume: { seed: 'keep|me', cells: 9, ink: [0, 9], tier: 0, moves: 3, hints: 1, elapsedMs: 5000 } }));
-    const good = (await import(`/js/store.js?shape=${Date.now()}`)).Store;
+    const good = (await import(storeUrl(`shape=${Date.now()}`))).Store;
     eq('形状对的存档才被接受', good.resume().seed, 'keep|me');
     eq('续局带回九格', good.resume().board.length, 9);
     eq('续局带回步数', good.resume().moves, 3);
@@ -1066,7 +1071,7 @@
           throw new Error('Safari in private mode');
         },
       });
-      const N = (await import(`/js/store.js?throwing=${Date.now()}`)).Store;
+      const N = (await import(storeUrl(`throwing=${Date.now()}`))).Store;
       threw = N.resume() === null && N.setting('sound') === true;
       N.save();
       N.saveResume(g.puzzle, g.st.cell, 1000, { moves: 1, hints: 1 });
