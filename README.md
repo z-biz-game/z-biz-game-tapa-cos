@@ -197,7 +197,7 @@ npm run electron     # 桌面壳（electron/main.cjs，同一份代码，无构�
 
 ```bash
 npm run check              # 逐文件 node --check + 入口断言（index.html 里有 <canvas>、引了 js/main.js）→ OK
-npm test                   # 引擎断言 340 通过 / 0 失败（§1…§8，每节都打实测数字，不是只打 ok）
+npm test                   # 引擎断言 339 通过 / 0 失败（§1…§8 共 9 个小节；期望值是手算字面量。运行时只打最后那一行总分，分组的标题写在源码里而不是 stdout）
 node tools/bake.mjs --check # ✓ 30 局复验一致、与重跑逐字节相同；五档各「超预算 0」，最深 380/1006/1202/2072/79444 节点
 SAMPLES=24 npm run balance # 中位数严格递增、五档命中 band 100%、15/15 零猜测、15/15 穷举逐格一致 → exit 0
 npm run verify             # 真实 headless Chrome：11 个场景 / 476 条断言 / 0 失败（HTTP 5312、CDP 9362）
@@ -233,7 +233,7 @@ npm run verify             # 真实 headless Chrome：11 个场景 / 476 条断�
   `localStorage` 的**取值 getter** 就抛异常（隐私模式）也照样能玩（`js/store.js:65-86`）。
   实测：49 格续局 **119 字节 / 8 段**（`save` 场景读数）。
 - 规模：**11 个运行时 ES Module + 6 个验证脚本**，运行时依赖 **0 个**；
-  引擎测试 340 条断言、浏览器断言 476 条，均为本轮实测（出处见上）。
+  引擎测试 339 条断言、浏览器断言 476 条，均为本轮实测（出处见上）。
 
 ---
 
