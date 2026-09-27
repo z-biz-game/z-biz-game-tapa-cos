@@ -209,7 +209,12 @@ function showHint(info) {
 function onWin() {
   stopClock();
   const ms = clock();
-  const better = Store.recordBest(game.puzzle.tier, {
+  // Records are filed by tier *key* (`Store.best('hard')`, which is how renderRecords reads them and
+  // how tools/engine-test.mjs spells them), while a puzzle carries the tier *index* it was generated
+  // with (js/engine/generate.js:203). Handing the index over wrote data.best["3"]: the run was
+  // recorded and then read back by nothing — the 纪录 table stayed on 还没有纪录 and every win
+  // claimed 新纪录.
+  const better = Store.recordBest(TIERS[game.puzzle.tier].key, {
     ms,
     hints: game.hints,
     moves: game.moves,
