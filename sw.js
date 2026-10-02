@@ -7,9 +7,32 @@
 //
 // 绝不做 cache-first：手工版本号 + cache-first 会把 js/css 永久钉死在旧版，
 // 出新 HTML 配旧 JS 的鬼状态比离线打不开更难查。
-var CACHE = 'tapa-pwa-v1';
+var CACHE = 'tapa-pwa-v2';
 // 外壳单独预取：离线路径下的第一跳是导航请求，只靠"上次顺手回填"不够。
-var SHELL = ['./', './index.html', './css/game.css', './js/main.js'];
+// 名单得盖到整张模块图和游戏真用到的贴图：main.js 是 ESM，断网首开时那 12 个依赖
+// 与三张母题 PNG 一次都没被回填过 —— 只列 main.js 的"离线可玩"是句假话。
+// manifest 图标与社交卡不进这张表：它们不在开局路径上，联网首访时网络优先已经存好了。
+var SHELL = [
+  './',
+  './index.html',
+  './css/game.css',
+  './js/main.js',
+  './js/theme.js',
+  './js/store.js',
+  './js/audio/synth.js',
+  './js/data/library.js',
+  './js/engine/count.js',
+  './js/engine/generate.js',
+  './js/engine/rng.js',
+  './js/engine/tapa.js',
+  './js/render/assets.js',
+  './js/render/board.js',
+  './js/render/fx.js',
+  './js/ui/game.js',
+  './assets/img/board-grain.png',
+  './assets/img/ink-sprite.png',
+  './assets/img/pulse-hoop.png',
+];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(

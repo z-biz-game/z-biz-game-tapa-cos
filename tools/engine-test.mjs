@@ -7,6 +7,9 @@
 // silently agree with itself (an interior ring treated as a path, a clue of `0 0 0` treated as "no
 // clue", a 2×2 judged while cells are still unknown), the test name says which convention is meant.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   WHITE,
   BLACK,
@@ -808,6 +811,41 @@ for (const [label, board] of crossBoards) {
   eq('隐私模式下清空存档同样不抛错', threw, null);
   eq('抛错的那个 localStorage 一次也没被写穿过', map.size, 0);
   install(working);
+}
+
+// ---- 离线外壳与母题贴图 ---------------------------------------------------------------
+// "断网也开得起来"的可执行版本。sw 的预取名单是手抄的，加一个模块漏一个就成了假话，
+// 所以这里从模块图反查名单（图里有的，名单必须都有），而不是反过来对着名单数文件。
+{
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+  const listed = new Set(
+    (read('sw.js').match(/var SHELL = \[([\s\S]*?)\];/)[1].match(/'([^']+)'/g) || []).map((s) => s.slice(1, -1))
+  );
+  const graph = new Set(['js/main.js']);
+  const walk = (p) => {
+    const dir = path.posix.dirname(p);
+    for (const m of read(p).matchAll(/from\s+'(\.[^']+)'/g)) {
+      const q = path.posix.normalize(path.posix.join(dir, m[1]));
+      if (!graph.has(q)) {
+        graph.add(q);
+        walk(q);
+      }
+    }
+  };
+  walk('js/main.js');
+  const noShell = [...graph].map((p) => './' + p).filter((p) => !listed.has(p));
+  ok('模块图整张都在离线外壳里', noShell.length === 0, `缺 ${noShell.length} 个：${noShell.join(' ')}`);
+  const absent = [...listed].filter((u) => u !== './' && !fs.existsSync(path.join(root, u)));
+  ok('离线外壳点的每个路径盘上都有实物', absent.length === 0, absent.join(' '));
+  const motifs = [...read('js/render/assets.js').matchAll(/'(assets\/img\/[^']+)'/g)].map((m) => './' + m[1]);
+  ok('游戏用到的母题贴图都进了外壳', motifs.every((p) => listed.has(p)), motifs.filter((p) => !listed.has(p)).join(' '));
+  const junk = motifs.filter((p) => {
+    const b = fs.readFileSync(path.join(root, p));
+    return b.subarray(1, 4).toString('latin1') !== 'PNG' || b.readUInt32BE(16) < 64 || b.readUInt32BE(20) < 64 || b.length < 300;
+  });
+  ok('母题贴图是真 PNG、≥64px 且不是空壳', junk.length === 0, junk.join(' '));
+  eq('游戏里的母题贴图是三条', motifs.length, 3);
 }
 
 console.log(`\n${pass} 条断言通过 / ${fail} 条失败`);
