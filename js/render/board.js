@@ -12,8 +12,9 @@
 // direction its group starts, which needs air outside the clue cell: the layout reserves half a cell
 // on every side, and that margin is also where a corner clue's single digit lives.
 
-import { Palette, Radius, Cell, Font, Shadow } from '../theme.js';
+import { Palette, Radius, Cell, Font, Shadow, Motion, prefersReducedMotion } from '../theme.js';
 import { NO_CLUE, UNKNOWN, WHITE, BLACK, clueDigits, isZeroClue, ringLabel } from '../engine/tapa.js';
+import { motif } from './assets.js';
 
 // Where inside a cell's own box a digit sits, in units of the cell, keyed by the engine's compass
 // label. Slot order is the engine's ring order, so a digit and the group it counts share an index.
@@ -43,6 +44,8 @@ export class BoardView {
     this.ctx = canvas.getContext('2d');
     this.geo = { cell: 0, x: 0, y: 0, w: 0, h: 0, dpr: 1 };
     this.game = null;
+    this.grainPattern = null;
+    this.grainKey = null;
   }
 
   // The backing buffer is sized in device pixels while every draw call stays in CSS pixels: one
@@ -90,6 +93,24 @@ export class BoardView {
     return gy * game.w + gx;
   }
 
+  // Paper, not wallpaper: the generated 256px tile goes between the ink and the grid at one tenth
+  // alpha, so the board reads as a surface rather than as four flat fills. No texture yet decoded —
+  // file://, a blocked request, a harness with no decoder — and the board paints exactly as before.
+  drawGrain(ctx, geo) {
+    const img = motif('grain');
+    if (!img) return;
+    if (this.grainKey !== img) {
+      this.grainPattern = (ctx.createPattern && ctx.createPattern(img, 'repeat')) || null;
+      this.grainKey = img;
+    }
+    if (!this.grainPattern) return;
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = this.grainPattern;
+    ctx.fillRect(0, 0, geo.w, geo.h);
+    ctx.restore();
+  }
+
   // The cells whose ink is contradicted. Read off diagnose()'s sets, plus one presentation-only step:
   // a clue that is wrong points at itself, so its black ring cells are shown as the suspects.
   suspects(game) {
@@ -104,7 +125,7 @@ export class BoardView {
     return out;
   }
 
-  draw(game, { pulse = null, preview = null } = {}) {
+  draw(game, { pulse = null, preview = null, fx = null, nowMs = 0 } = {}) {
     this.game = game;
     const { ctx, geo } = this;
     const { cell } = geo;
@@ -146,6 +167,8 @@ export class BoardView {
       }
     }
 
+    this.drawGrain(ctx, geo);
+
     // Grid, drawn over the fills so the lines stay one pixel wide at any cell size.
     ctx.strokeStyle = Palette.line;
     ctx.lineWidth = 1;
@@ -160,22 +183,41 @@ export class BoardView {
 
     // What a hint just named — the only place the UI is allowed to say "look here".
     if (pulse && pulse.cell != null) {
+      const k = pulsePhase(pulse, nowMs);
       const r = this.cellRect(pulse.cell);
-      ctx.strokeStyle = pulse.color || Palette.hint;
-      ctx.lineWidth = Math.max(2.5, cell * 0.09);
-      roundRect(ctx, r.x + 2, r.y + 2, cell - 4, cell - 4, Radius.cell);
-      ctx.stroke();
+      const grow = prefersReducedMotion() ? 0 : k;
+      const alpha = prefersReducedMotion() ? 1 : Math.max(0.15, 1 - k * 0.85);
+      const cx = r.x + r.size / 2;
+      const cy = r.y + r.size / 2;
+      const hoop = motif('hoop');
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (hoop) {
+        const d = r.size * (1.05 + grow * 0.75);
+        ctx.drawImage(hoop, cx - d / 2, cy - d / 2, d, d);
+      } else {
+        ctx.strokeStyle = pulse.color || Palette.hint;
+        ctx.lineWidth = Math.max(2.5, cell * 0.09);
+        const inset = 2 + grow * cell * 0.18;
+        roundRect(ctx, r.x + inset, r.y + inset, r.size - inset * 2, r.size - inset * 2, Radius.cell);
+        ctx.stroke();
+      }
+      ctx.restore();
       if (pulse.clue != null && pulse.clue >= 0 && pulse.slot != null && pulse.slot >= 0) {
         // Ring the direction the clue's number belongs to, so "哪一格" and "哪条线索" are answered by
         // the same gesture.
         const p = this.slotPoint(pulse.clue, pulse.slot);
         ctx.beginPath();
-        ctx.arc(p.x, p.y, Math.max(8, cell * 0.3), 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, Math.max(8, cell * (0.3 + grow * 0.12)), 0, Math.PI * 2);
         ctx.strokeStyle = Palette.hint;
         ctx.lineWidth = Math.max(1.5, cell * 0.05);
+        ctx.globalAlpha = alpha;
         ctx.stroke();
+        ctx.globalAlpha = 1;
       }
     }
+
+    if (fx) fx.draw(ctx);
   }
 
   // Clue digits, the `0 0 0` marker, and the green ring that says "this clue already adds up".
@@ -250,6 +292,15 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, k);
   ctx.arcTo(x, y, x + w, y, k);
   ctx.closePath();
+}
+
+// 0 → 1 across the ring's own life, read from the presentation clock rather than a frame counter —
+// the same instant has to paint the same ring at 30, 60 and 120 Hz.
+export function pulsePhase(pulse, nowMs) {
+  if (!pulse) return 0;
+  const t0 = pulse.t0 == null ? nowMs : pulse.t0;
+  const k = (nowMs - t0) / Motion.pulse;
+  return k < 0 ? 0 : k > 1 ? 1 : k;
 }
 
 // The harness asserts on the same sentinels the renderer does, so they leave this module by name

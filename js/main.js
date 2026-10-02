@@ -2,7 +2,7 @@
 // harness drives. No rule about the board lives here — every judgement (what a cell may be, whether
 // the board adds up, what a hint may say) comes from js/engine/tapa.js through js/ui/game.js.
 
-import { Palette, Cell, applyThemeVars, setReduceMotion, systemPrefersReducedMotion } from './theme.js';
+import { Palette, Cell, Motion, applyThemeVars, setReduceMotion, systemPrefersReducedMotion } from './theme.js';
 import { Sound } from './audio/synth.js';
 import { Store } from './store.js';
 import { TIERS, tierFor, tierIndexFor, generate, randomInk } from './engine/generate.js';
@@ -10,7 +10,9 @@ import { LIBRARY, byTier } from './data/library.js';
 import { dayKey } from './engine/rng.js';
 import * as Engine from './engine/tapa.js';
 import { analyze } from './engine/count.js';
-import { BoardView } from './render/board.js';
+import { BoardView, pulsePhase } from './render/board.js';
+import { InkFx } from './render/fx.js';
+import { loadMotifs } from './render/assets.js';
 import { Game, valueName, hintLine, BLACK, WHITE, UNKNOWN } from './ui/game.js';
 
 const VERSION = '1.0.0';
@@ -48,13 +50,20 @@ const el = {
 };
 
 const view = new BoardView(el.canvas);
+const fx = new InkFx();
 let game = null;
 let pulse = null;
 let stroke = null;
 let pulseTimer = 0;
 let startedAt = 0;
 let baseElapsed = 0;
-let ticker = 0;
+
+// 表现层时钟：单调、暂停照走，只管"现在几点"。对局计时是下面那个 clock()，暂停会停 ——
+// 两者分开，一个动画才不会在暂停时替玩家继续跑。
+const nowMs = () =>
+  typeof performance === 'object' && performance && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
 
 const clock = () => baseElapsed + (startedAt ? Date.now() - startedAt : 0);
 const running = () => !!startedAt;
@@ -62,6 +71,50 @@ const running = () => !!startedAt;
 function fmtMs(ms) {
   const s = Math.floor(ms / 1000);
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// ---- the presentation loop -------------------------------------------------
+// 全仓唯一读帧间隔的地方，而且只当成"过了多少时间"来读 —— 模拟器把它花成整定步长。
+// 没有任何一处位移乘这个 dt。
+let rafId = 0;
+let lastFrameAt = 0;
+let frames = 0;
+
+function loopWanted() {
+  if (paused) return false;
+  if (fx.active()) return true;
+  if (pulse && pulsePhase(pulse, nowMs()) < 1) return true;
+  return !!(game && running() && game.status !== 'won');
+}
+
+function startLoop() {
+  if (rafId || paused) return;
+  lastFrameAt = nowMs();
+  rafId = requestAnimationFrame(frame);
+}
+
+function stopLoop() {
+  if (!rafId) return;
+  cancelAnimationFrame(rafId);
+  rafId = 0;
+}
+
+function frame(now) {
+  const dt = (now - lastFrameAt) / 1000;
+  lastFrameAt = now;
+  frames++;
+  if (paused) {
+    rafId = 0;
+    return;
+  }
+  fx.advance(dt);
+  if (game) {
+    const t = fmtMs(clock());
+    if (el.time.textContent !== t) el.time.textContent = t;
+    if (pulse || fx.active()) draw();
+  }
+  if (loopWanted()) rafId = requestAnimationFrame(frame);
+  else rafId = 0;
 }
 
 // ---- the puzzle ------------------------------------------------------------
@@ -102,8 +155,11 @@ function draw() {
   view.resize(game, w, h);
   view.draw(game, {
     pulse,
+    fx,
+    nowMs: nowMs(),
     preview: stroke && stroke.items.length ? { cells: stroke.items.map((i) => i.cell) } : null,
   });
+  startLoop();
 }
 
 // One place writes the readouts, so a stat can never be updated by half the file.
@@ -145,18 +201,12 @@ function flushResume() {
 
 function startClock() {
   startedAt = Date.now();
-  clearInterval(ticker);
-  ticker = setInterval(() => {
-    el.time.textContent = fmtMs(clock());
-    if (pulse) draw();
-  }, 1000);
+  startLoop();
 }
 
 function stopClock() {
   baseElapsed = clock();
   startedAt = 0;
-  clearInterval(ticker);
-  ticker = 0;
 }
 
 // The brush a drag paints with. A tap still cycles, so the brush is only half the gesture story.
@@ -185,6 +235,9 @@ function setPaused(next) {
   if (!game || game.status === 'won') return paused;
   const want = !!next;
   if (want === paused) return paused;
+  // 先落状态再动副作用：解冻路径要 startClock → startLoop，而 startLoop 认 paused 拒绝重新排队。
+  // 顺序反过来，继续 按下去只是把计时基准换了一下，帧循环再也起不来。
+  paused = want;
   if (want) {
     if (stroke) {
       unpreview();
@@ -192,12 +245,13 @@ function setPaused(next) {
     }
     flushResume();
     stopClock();
-    syncAll();
+    // 已经排队的下一帧也要收回：留着它，暂停后仍会烧掉一次 frame() 的空转。
+    stopLoop();
   } else {
     startClock();
   }
-  paused = want;
   paintPauseUi();
+  syncAll();
   return paused;
 }
 
@@ -224,30 +278,31 @@ function showHint(info) {
   if (info.conflict) {
     el.hintRule.textContent = '这里和线索矛盾';
     el.hintLine.textContent = info.conflict;
-    pulse = { cell: info.cell, color: 'rgba(255,92,122,0.9)' };
+    pulse = { cell: info.cell, color: 'rgba(255,92,122,0.9)', t0: nowMs() };
     pulseTimer = setTimeout(() => {
       clearPulse();
       draw();
-    }, 1600);
+    }, Motion.pulse);
     Sound.conflict();
     return;
   }
   el.hintRule.textContent = `规则：${info.rule}`;
   el.hintLine.textContent = info.why;
-  pulse = { cell: info.cell, clue: info.clue, slot: info.slot };
+  pulse = { cell: info.cell, clue: info.clue, slot: info.slot, t0: nowMs() };
   const mine = pulse;
   pulseTimer = setTimeout(() => {
     if (pulse === mine) {
       pulse = null;
       draw();
     }
-  }, 1600);
+  }, Motion.pulse);
   Sound.hint();
 }
 
 function onWin() {
   stopClock();
   clearPause();
+  fx.celebrate(view.geo.w, view.geo.h);
   const ms = clock();
   // Records are filed by tier *key* (`Store.best('hard')`, which is how renderRecords reads them and
   // how tools/engine-test.mjs spells them), while a puzzle carries the tier *index* it was generated
@@ -269,12 +324,29 @@ function onWin() {
   renderRecords();
 }
 
-function afterStep(soundValue) {
+// 一笔落地，墨点跟着溅起来。坐标取自 view.cellRect —— 和画布上那一格同源，所以缩放/换档
+// 之后墨点不会落到邻居头上。长笔画只采三处：一次 30 格的横扫该溅几朵，不该溅 30 朵。
+function spawnInk(step) {
+  if (!step || !game) return;
+  const writes = step.writes || (step.cell != null ? [{ cell: step.cell, to: step.value }] : []);
+  if (!writes.length) return;
+  const picks =
+    writes.length <= 6 ? writes : [writes[0], writes[writes.length >> 1], writes[writes.length - 1]];
+  for (const w of picks) {
+    if (!w || w.cell == null || w.from === w.to) continue;
+    const r = view.cellRect(w.cell);
+    fx.splash(r.x + r.size / 2, r.y + r.size / 2, r.size, w.to == null ? step.value : w.to, 5);
+  }
+}
+
+function afterStep(step) {
+  spawnInk(step);
   syncAll();
   if (game.status === 'won') onWin();
   else {
     flushResume();
-    if (soundValue !== null) Sound.place(soundValue);
+    const value = step && step.value !== undefined ? step.value : null;
+    if (value !== null) Sound.place(value);
     if (game.stuck || game.violated.length) Sound.conflict();
   }
 }
@@ -290,7 +362,7 @@ function useHint() {
     return info;
   }
   showHint(info);
-  if (game.hints !== before) afterStep(info.value);
+  if (game.hints !== before) afterStep(info);
   return info;
 }
 
@@ -311,6 +383,7 @@ function begin({ tier = TIERS[0].key, seed = null, resume = null } = {}) {
   if (!puzzle) return null;
   game = new Game(puzzle);
   clearPulse();
+  fx.reset();
   stroke = null;
   el.winVeil.hidden = true;
   clearPause();
@@ -342,6 +415,8 @@ function show(which) {
   if (which === 'menu') {
     clearPause();
     stopClock();
+    fx.reset();
+    stopLoop();
     renderMenu();
   }
   if (which === 'game') draw();
@@ -413,10 +488,18 @@ function applySettings() {
   const reduce = !!Store.setting('reduceMotion') || systemPrefersReducedMotion();
   setReduceMotion(!!Store.setting('reduceMotion'));
   document.body.classList.toggle('reduce-motion', reduce);
+  fx.setEnabled(!reduce);
   $('#btn-sound').setAttribute('aria-pressed', String(!!Store.setting('sound')));
   $('#btn-sound').textContent = Store.setting('sound') ? '音效 开' : '音效 关';
   $('#btn-motion').setAttribute('aria-pressed', String(!!Store.setting('reduceMotion')));
   $('#btn-motion').textContent = reduce ? '动效 省' : '动效 全';
+}
+
+function toggleSound() {
+  Store.setSetting('sound', !Store.setting('sound'));
+  applySettings();
+  // 确认音只在还开着的时候敲：关着还能敲出声，那个开关就是假的。
+  if (!Sound.muted()) Sound.black();
 }
 
 // ---- pointer gestures ------------------------------------------------------
@@ -471,7 +554,7 @@ function strokeEnd() {
   unpreview(s);
   if (!s.moved) {
     const step = game.tap(cells[0]);
-    if (step) afterStep(step.value);
+    if (step) afterStep(step);
     else syncAll();
     return step;
   }
@@ -480,7 +563,7 @@ function strokeEnd() {
     syncAll();
     return null;
   }
-  afterStep(s.value);
+  afterStep(step);
   return step;
 }
 
@@ -518,12 +601,7 @@ $('#btn-resume').addEventListener('click', () => {
   if (!r || r.seed == null) return;
   begin({ tier: r.tier, seed: r.seed, resume: r });
 });
-$('#btn-sound').addEventListener('click', () => {
-  Store.setSetting('sound', !Store.setting('sound'));
-  applySettings();
-  // 确认音只在还开着的时候敲：关着还能敲出声，那个开关就是假的。
-  if (!Sound.muted()) Sound.black();
-});
+$('#btn-sound').addEventListener('click', toggleSound);
 $('#btn-motion').addEventListener('click', () => {
   Store.setSetting('reduceMotion', !Store.setting('reduceMotion'));
   applySettings();
@@ -535,9 +613,39 @@ $('#btn-reset').addEventListener('click', () => {
   show('menu');
 });
 
+// 玩法一句话说明就写在提示面板里 —— 那是这一局唯一的"当前该看哪"的地方，另开一个浮层只会
+// 让人先学会关浮层。
+const TEACHING =
+  '点一格：未知 → 黑 → 白。按住拖：用当前画笔连染一片，右 drag 是橡皮。数字写在它数的那个方向的边上，顺时针读，数的是那个方向上连续的墨段；三个 0 的环是说这格四周全白。';
+
 window.addEventListener('keydown', (ev) => {
   if (ev.target && /input|textarea/i.test(ev.target.tagName)) return;
   const k = ev.key.toLowerCase();
+  const onMenu = !el.viewMenu.hidden;
+  // 菜单里 Enter / 空格就是"开一局"。键盘玩家没有鼠标也必须进得了关，这一条比快捷键表上
+  // 其它所有条都优先。
+  if (onMenu && (k === 'enter' || k === ' ')) {
+    ev.preventDefault();
+    begin({ tier: TIERS[0].key });
+    return;
+  }
+  // 全屏与静音是系统级开关：暂停着也得按得动，否则"暂停"把玩家的显示器和耳朵一起锁住了。
+  if (k === 'f') {
+    ev.preventDefault();
+    toggleFullscreen();
+    return;
+  }
+  if (k === 'm') {
+    ev.preventDefault();
+    toggleSound();
+    return;
+  }
+  if (k === '?' || (k === '/' && ev.shiftKey)) {
+    ev.preventDefault();
+    el.hintRule.textContent = '玩法';
+    el.hintLine.textContent = TEACHING;
+    return;
+  }
   // 暂停时只有 P / 空格负责解冻。空格不能抢焦点按钮的原生激活：焦点在按钮上时让给它自己。
   if (k === 'p' || (k === ' ' && ev.target && ev.target.tagName !== 'BUTTON')) {
     ev.preventDefault();
@@ -545,12 +653,23 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
   if (paused) return;
+  if (k === 'r') {
+    if (!game) return;
+    ev.preventDefault();
+    begin({ tier: game.puzzle.tier });
+    return;
+  }
+  if (k === 'enter' && game && game.status === 'won') {
+    ev.preventDefault();
+    begin({ tier: game.puzzle.tier });
+    return;
+  }
   if (k === 'h') useHint();
   else if (k === 'z') undo();
   else if (k === 'b') setMode(BLACK);
   else if (k === 'w') setMode(WHITE);
   else if (k === 'e') setMode(UNKNOWN);
-  else if (/^[1-5]$/.test(k) && !el.viewMenu.hidden) begin({ tier: TIERS[Number(k) - 1].key });
+  else if (/^[1-5]$/.test(k) && onMenu) begin({ tier: TIERS[Number(k) - 1].key });
 });
 
 window.addEventListener('resize', draw);
@@ -561,6 +680,7 @@ window.addEventListener('pagehide', flushResume);
 
 applyThemeVars();
 applySettings();
+loadMotifs();
 renderMenu();
 
 // manifest 的 shortcut 写着 ./?resume=1，这条 URL 于是不能只把人送回菜单：广告一个入口
@@ -593,13 +713,13 @@ const surface = {
   stroke(cells, value) {
     if (!game) return null;
     const step = game.stroke(cells, value === undefined ? game.mode : value);
-    if (step) afterStep(step.value);
+    if (step) afterStep(step);
     return step;
   },
   tap(t, value) {
     if (!game) return null;
     const step = value === undefined ? game.tap(t) : game.stroke([t], value);
-    if (step) afterStep(step.value);
+    if (step) afterStep(step);
     else syncAll();
     return step;
   },
@@ -612,6 +732,15 @@ const surface = {
   },
   elapsed: clock,
   state: () => (game ? { ...game.state(), elapsedMs: clock() } : null),
+  // 表现层也得能被读到：只挂引擎账本的对拍会把"动画根本没时间轴"当成三档全等。
+  fx: () => fx.state(),
+  anim: () => ({
+    frames,
+    rafOn: !!rafId,
+    clockMs: nowMs(),
+    lastFrameAt,
+    pulsePhase: pulse ? pulsePhase(pulse, nowMs()) : null,
+  }),
   cellAt: (x, y) => (game ? game.cellAt(x, y) : -1),
   valueOf: (t) => (game ? game.valueOf(t) : UNKNOWN),
   valueName,

@@ -71,6 +71,7 @@ export const Motion = {
   base: 220,
   pop: 260,
   ring: 300,
+  pulse: 1600,
   win: 900,
   spring: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
   ease: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
