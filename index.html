@@ -109,6 +109,15 @@
               </div>
             </div>
           </div>
+          <div id="pause-veil" hidden>
+            <div class="win-card pause-card">
+              <h3>已暂停</h3>
+              <p>计时停在这一刻，棋盘不再接收落墨，提示与撤销也一起收住。</p>
+              <div class="win-actions">
+                <button id="btn-unpause" class="primary" type="button">继续</button>
+              </div>
+            </div>
+          </div>
         </div>
         <p id="state-line" class="conflict-line" aria-live="polite"></p>
       </div>
@@ -123,6 +132,8 @@
           <button id="btn-hint" class="primary" type="button">提示<span class="mono" id="hint-count">0</span></button>
           <button id="btn-undo" class="ghost" type="button">撤销</button>
           <button id="btn-new" class="ghost" type="button">换一局</button>
+          <button id="btn-pause" class="ghost" type="button" aria-pressed="false">暂停</button>
+          <button id="btn-full" class="ghost" type="button" aria-pressed="false">全屏</button>
           <button id="btn-menu" class="ghost" type="button">回选档</button>
         </div>
 

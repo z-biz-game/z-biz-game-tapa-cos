@@ -40,6 +40,7 @@ const el = {
   hintCount: $('#hint-count'),
   stateLine: $('#state-line'),
   winVeil: $('#win-veil'),
+  pauseVeil: $('#pause-veil'),
   winMeta: $('#win-meta'),
   winRecord: $('#win-record'),
   wrap: $('#board-wrap'),
@@ -169,6 +170,44 @@ function setMode(value) {
   draw();
 }
 
+let paused = false;
+
+// 暂停是真的停：计时冻住、笔落不下去、提示与撤销一起收掉。收笔之前先把这一笔的预览退回 ——
+// 半截笔画留在盘上却没有 commit，那是 撤销 拿不回来的幽灵墨。
+function paintPauseUi() {
+  el.pauseVeil.hidden = !paused;
+  const btn = $('#btn-pause');
+  btn.textContent = paused ? '继续' : '暂停';
+  btn.setAttribute('aria-pressed', String(paused));
+}
+
+function setPaused(next) {
+  if (!game || game.status === 'won') return paused;
+  const want = !!next;
+  if (want === paused) return paused;
+  if (want) {
+    if (stroke) {
+      unpreview();
+      stroke = null;
+    }
+    flushResume();
+    stopClock();
+    syncAll();
+  } else {
+    startClock();
+  }
+  paused = want;
+  paintPauseUi();
+  return paused;
+}
+
+// 复位但不碰计时：换一局、回菜单、赢下这一局都走这里。那三处各自已经知道该 stop 还是 start，
+// 暂停不该替它们决定。
+function clearPause() {
+  paused = false;
+  paintPauseUi();
+}
+
 function clearPulse() {
   clearTimeout(pulseTimer);
   pulseTimer = 0;
@@ -208,6 +247,7 @@ function showHint(info) {
 
 function onWin() {
   stopClock();
+  clearPause();
   const ms = clock();
   // Records are filed by tier *key* (`Store.best('hard')`, which is how renderRecords reads them and
   // how tools/engine-test.mjs spells them), while a puzzle carries the tier *index* it was generated
@@ -240,7 +280,7 @@ function afterStep(soundValue) {
 }
 
 function useHint() {
-  if (!game || game.status === 'won') return null;
+  if (!game || game.status === 'won' || paused) return null;
   const before = game.hints;
   const info = game.hint();
   if (!info) return null;
@@ -255,7 +295,7 @@ function useHint() {
 }
 
 function undo() {
-  if (!game) return null;
+  if (!game || paused) return null;
   const step = game.undo();
   if (!step) return null;
   clearPulse();
@@ -273,6 +313,7 @@ function begin({ tier = TIERS[0].key, seed = null, resume = null } = {}) {
   clearPulse();
   stroke = null;
   el.winVeil.hidden = true;
+  clearPause();
   baseElapsed = 0;
   // A save that does not fit the board it is being replayed onto is dropped whole: the run starts
   // clean rather than resuming a shifted picture with someone else's clock on it.
@@ -299,6 +340,7 @@ function show(which) {
   el.viewMenu.hidden = which !== 'menu';
   el.viewGame.hidden = which !== 'game';
   if (which === 'menu') {
+    clearPause();
     stopClock();
     renderMenu();
   }
@@ -354,7 +396,9 @@ function renderRecords() {
 function renderResumeCard() {
   const r = Store.resume();
   // Do not offer "继续" for the board already on screen.
-  const live = game && game.status !== 'won' && running();
+  // paused 也要算"还在屏幕上活着"：暂停把 startedAt 清零了，只问 running() 会让菜单在
+  // 玩家暂停的那一刻起，把同一局当成一份可以重开的存档推给他。
+  const live = game && game.status !== 'won' && (running() || paused);
   if (!r || (live && r.seed === game.puzzle.originSeed && r.tier === game.puzzle.tier)) {
     el.resumeCard.hidden = true;
     return;
@@ -391,7 +435,7 @@ function unpreview(s = stroke) {
 }
 
 function strokeStart(ev) {
-  if (!game || game.status === 'won') return;
+  if (!game || game.status === 'won' || paused) return;
   const t = view.hitCell(ev.clientX, ev.clientY);
   if (t < 0) return;
   ev.preventDefault();
@@ -463,6 +507,10 @@ $('#btn-menu').addEventListener('click', () => {
 });
 $('#btn-menu-2').addEventListener('click', () => show('menu'));
 $('#btn-again').addEventListener('click', () => begin({ tier: game ? game.puzzle.tier : TIERS[0].key }));
+$('#btn-pause').addEventListener('click', () => setPaused(!paused));
+$('#btn-unpause').addEventListener('click', () => setPaused(false));
+$('#btn-full').addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', syncFullButton);
 $('#btn-resume').addEventListener('click', () => {
   const r = Store.resume();
   // No origin seed means no way to rebuild *that* board — the generator is deterministic in its
@@ -473,7 +521,8 @@ $('#btn-resume').addEventListener('click', () => {
 $('#btn-sound').addEventListener('click', () => {
   Store.setSetting('sound', !Store.setting('sound'));
   applySettings();
-  Sound.black();
+  // 确认音只在还开着的时候敲：关着还能敲出声，那个开关就是假的。
+  if (!Sound.muted()) Sound.black();
 });
 $('#btn-motion').addEventListener('click', () => {
   Store.setSetting('reduceMotion', !Store.setting('reduceMotion'));
@@ -489,6 +538,13 @@ $('#btn-reset').addEventListener('click', () => {
 window.addEventListener('keydown', (ev) => {
   if (ev.target && /input|textarea/i.test(ev.target.tagName)) return;
   const k = ev.key.toLowerCase();
+  // 暂停时只有 P / 空格负责解冻。空格不能抢焦点按钮的原生激活：焦点在按钮上时让给它自己。
+  if (k === 'p' || (k === ' ' && ev.target && ev.target.tagName !== 'BUTTON')) {
+    ev.preventDefault();
+    setPaused(!paused);
+    return;
+  }
+  if (paused) return;
   if (k === 'h') useHint();
   else if (k === 'z') undo();
   else if (k === 'b') setMode(BLACK);
@@ -524,6 +580,11 @@ const surface = {
   },
   show,
   begin,
+  get paused() {
+    return paused;
+  },
+  setPaused,
+  toggleFullscreen,
   useHint,
   undo,
   setMode,
@@ -581,6 +642,26 @@ const surface = {
     UNKNOWN,
   },
 };
+
+// 全屏要真发请求，也要真读回状态：系统拒绝、浏览器不支持、玩家按 Esc 退出，按钮都得跟着改字
+// —— "按钮写着全屏而屏幕没全屏"就是假开关。
+function toggleFullscreen() {
+  const host = document.documentElement;
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.().catch(() => {});
+    return false;
+  }
+  if (!host.requestFullscreen) return false;
+  host.requestFullscreen().catch(() => {});
+  return true;
+}
+
+function syncFullButton() {
+  const on = !!document.fullscreenElement;
+  const btn = $('#btn-full');
+  btn.textContent = on ? '退出全屏' : '全屏';
+  btn.setAttribute('aria-pressed', String(on));
+}
 
 // Two names for one object. `window.App` is the handle the round's brief asks for; `window.tapa` is
 // the per-game namespace this family's browser harness drives (`window.slant` in the reference repo),

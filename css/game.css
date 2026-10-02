@@ -276,7 +276,8 @@ main { flex: 1; }
 
 .conflict-line.good { color: var(--accent); }
 
-#win-veil {
+#win-veil,
+#pause-veil {
   position: absolute;
   inset: 0;
   display: grid;
@@ -285,6 +286,10 @@ main { flex: 1; }
   border-radius: var(--radius-card);
   animation: rise var(--dur-base) var(--ease-ease) both;
 }
+
+/* 暂停比胜利更"合上"一点：底色压深，卡片不用那圈强调色边框。 */
+#pause-veil { background: rgba(7, 10, 20, 0.9); }
+.pause-card { border-color: var(--line-heavy); }
 
 .win-card {
   text-align: center;

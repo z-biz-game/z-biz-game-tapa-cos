@@ -32,8 +32,12 @@ function audio() {
 // to this; adding a second voice shape is how a game ends up with sounds that do not belong to the
 // same instrument.
 function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }) {
+  // 静音的判断必须发生在 audio() 之前：audio() 会懒创建 AudioContext 并 resume 它，于是
+  // "关了音效"的标签页仍然占着一个正在跑的音频上下文 —— 手机上是实打实的功耗，还有一个
+  // 解释不通的图标。
+  if (!enabled) return;
   const ac = audio();
-  if (!ac || !enabled) return;
+  if (!ac) return;
   const t = ac.currentTime + delay;
   const osc = ac.createOscillator();
   const vol = ac.createGain();
@@ -49,10 +53,17 @@ function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }
 }
 
 export const Sound = {
+  // 开关的两面都得真动手：翻成静音时把已存在的上下文挂起，翻回来时唤醒它。
+  // ctx 还没被创建过时什么都不做 —— 静音不该反手替玩家造出一个音频上下文。
   setEnabled(v) {
     enabled = !!v;
+    if (!ctx) return;
+    if (!enabled && ctx.state === 'running') ctx.suspend().catch(() => {});
+    else if (enabled && ctx.state === 'suspended') ctx.resume().catch(() => {});
   },
   enabled: () => enabled,
+  // 同一个开关从另一面读：HUD 与验证台都按这个名字问它，避免各自再猜一次布尔的方向。
+  muted: () => !enabled,
 
   // Black is the downward, heavier gesture; white the lifted one. They are the two sounds a player
   // makes hundreds of times a board, so the pair has to be distinguishable with the eyes elsewhere.
