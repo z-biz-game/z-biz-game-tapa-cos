@@ -507,6 +507,15 @@ applyThemeVars();
 applySettings();
 renderMenu();
 
+// manifest 的 shortcut 写着 ./?resume=1，这条 URL 于是不能只把人送回菜单：广告一个入口
+// 而它落在别处，比不给入口更糟。走的是 #btn-resume 同一条 begin() 路径；没有存档时安静地
+// 留在菜单 —— 从桌面图标点进来的人不该先看到一个异常。
+{
+  const params = new URLSearchParams(location.search);
+  const r = params.get('resume') === '1' ? Store.resume() : null;
+  if (r) begin({ tier: r.tier, seed: r.seed, resume: r });
+}
+
 const surface = {
   version: VERSION,
   view,

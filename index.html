@@ -6,10 +6,28 @@
 <meta name="theme-color" content="#070A14" />
 <title>视窗 · Tapa 八邻环分段推理</title>
 <meta name="description" content="Tapa 视窗：一组数字写着黑格在你周围八格里怎么分组长短。每局唯一解、每局都能用逻辑推到底，提示只说推得出的那一步。" />
-<!-- Inline icon: without it the browser probes the Pages domain root for /favicon.ico and logs a 404.
-     The mark is the game's own idea — a black clue cell, its digits grouped around it, and the dashed
-     hoop that means `0 0 0` (which is not the same thing as "no clue here"). -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070A14'/%3E%3Crect x='9' y='13' width='14' height='14' rx='2.5' fill='%23F2F5FB'/%3E%3Ctext x='16' y='6.6' fill='%23FFC85C' font-family='monospace' font-size='7.4' font-weight='700' text-anchor='middle'%3E2%3C/text%3E%3Ctext x='28.4' y='22' fill='%23FFC85C' font-family='monospace' font-size='7.4' font-weight='700' text-anchor='middle'%3E1%3C/text%3E%3Ctext x='3.8' y='22' fill='%23FFC85C' font-family='monospace' font-size='7.4' font-weight='700' text-anchor='middle'%3E3%3C/text%3E%3Ccircle cx='16' cy='20' r='4.2' fill='none' stroke='%236FD3C5' stroke-width='1.6' stroke-dasharray='2.4 1.8'/%3E%3C/svg%3E" />
+<!-- 母题就是玩法本身：一枚按规则必黑的线索格（本游戏把黑格画成墨色），套上 `0 0 0` 的虚线环，
+     罗盘位北 2 / 东 1 / 西 3 顺时针读段长。位图不是手描进 HTML 的：全部由 assets/gen/gen_art.py
+     按 js/theme.js 的令牌栅格化，`python3 assets/gen/gen_art.py --verify` 复现同一批字节。 -->
+<link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="assets/img/favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="assets/img/apple-touch-icon.png" />
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="视窗 Tapa" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="视窗 · Tapa" />
+<meta property="og:title" content="视窗 · Tapa 八邻环分段推理" />
+<meta property="og:description" content="每局唯一解、每局都能用逻辑推到底。提示只说推得出的那一步，难度分是量出来的。" />
+<meta property="og:url" content="https://z-biz-game.github.io/z-biz-game-tapa-cos/" />
+<meta property="og:image" content="https://z-biz-game.github.io/z-biz-game-tapa-cos/assets/img/og-1200x630.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="一枚带虚线环与金色罗盘数字的 Tapa 线索格，配 TAPA 字标" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://z-biz-game.github.io/z-biz-game-tapa-cos/assets/img/og-1200x630.png" />
 <link rel="stylesheet" href="css/game.css" />
 </head>
 <body>
@@ -146,5 +164,6 @@
 </div>
 
 <script type="module" src="js/main.js"></script>
+<script src="js/sw-register.js"></script>
 </body>
 </html>

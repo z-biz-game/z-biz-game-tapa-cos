@@ -1,0 +1,51 @@
+{
+  "name": "视窗 · Tapa 八邻环分段推理",
+  "short_name": "视窗 Tapa",
+  "description": "Tapa 视窗：一组数字写着黑格在你周围八格里怎么分组长短。每局唯一解、每局都能用逻辑推到底，提示只说推得出的那一步。",
+  "id": "./",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "theme_color": "#070A14",
+  "background_color": "#070A14",
+  "categories": ["games", "puzzle"],
+  "icons": [
+    {
+      "src": "assets/img/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/img/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/img/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/img/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "继续上一局",
+      "short_name": "继续",
+      "description": "打开存档里未完成的那一局",
+      "url": "./?resume=1",
+      "icons": [{ "src": "assets/img/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}
