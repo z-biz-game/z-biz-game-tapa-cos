@@ -836,6 +836,13 @@ for (const [label, board] of crossBoards) {
   walk('js/main.js');
   const noShell = [...graph].map((p) => './' + p).filter((p) => !listed.has(p));
   ok('模块图整张都在离线外壳里', noShell.length === 0, `缺 ${noShell.length} 个：${noShell.join(' ')}`);
+  // 手抄名单的下一种腐法是"页面新加一个 script/stylesheet，名单没跟上"。所以页面自己
+  // 指向的每个同源文件也必须在名单里（绝对 URL 跳过：og 卡是爬虫取的，应用自己不请求）。
+  const pageRefs = [...read('index.html').matchAll(/(?:src|href)="(?!https?:)([^"]+)"/g)]
+    .map((m) => './' + m[1].replace(/^\.\//, ''))
+    .filter((u) => !u.endsWith('#'));
+  const pageMissing = pageRefs.filter((p) => !listed.has(p));
+  ok('index.html 指的每个同源文件都在外壳里', pageMissing.length === 0, `缺 ${pageMissing.length} 个：${pageMissing.join(' ')}`);
   const absent = [...listed].filter((u) => u !== './' && !fs.existsSync(path.join(root, u)));
   ok('离线外壳点的每个路径盘上都有实物', absent.length === 0, absent.join(' '));
   const motifs = [...read('js/render/assets.js').matchAll(/'(assets\/img\/[^']+)'/g)].map((m) => './' + m[1]);

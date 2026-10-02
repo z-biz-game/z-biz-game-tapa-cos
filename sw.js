@@ -11,7 +11,9 @@ var CACHE = 'tapa-pwa-v2';
 // 外壳单独预取：离线路径下的第一跳是导航请求，只靠"上次顺手回填"不够。
 // 名单得盖到整张模块图和游戏真用到的贴图：main.js 是 ESM，断网首开时那 12 个依赖
 // 与三张母题 PNG 一次都没被回填过 —— 只列 main.js 的"离线可玩"是句假话。
-// manifest 图标与社交卡不进这张表：它们不在开局路径上，联网首访时网络优先已经存好了。
+// index.html 自己指向的东西（注册脚本、manifest、favicon、apple-touch-icon）也一并进来：
+// 离线首开时这些是 404 就少一块的地方。只有 og 社交卡不进表 —— 那是爬虫读的绝对 URL，
+// 应用自己不取它，65KB 没理由压在 install 上。
 var SHELL = [
   './',
   './index.html',
@@ -29,6 +31,11 @@ var SHELL = [
   './js/render/board.js',
   './js/render/fx.js',
   './js/ui/game.js',
+  './js/sw-register.js',
+  './manifest.webmanifest',
+  './assets/img/favicon-32.png',
+  './assets/img/favicon-16.png',
+  './assets/img/apple-touch-icon.png',
   './assets/img/board-grain.png',
   './assets/img/ink-sprite.png',
   './assets/img/pulse-hoop.png',
