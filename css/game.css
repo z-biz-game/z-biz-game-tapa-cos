@@ -22,7 +22,13 @@ body { touch-action: manipulation; }
 #app {
   max-width: 1180px;
   margin: 0 auto;
-  padding: var(--space-page) var(--space-page) var(--space-inner);
+  /* 安全区：viewport-fit=cover 之后 env(safe-area-inset-*) 才有非零读数（刘海、home 条）。
+     用 max() 而不是加法：不支持 env() 的引擎把它当无效声明整条丢掉，于是退回原来的页面留白，
+     而不是退回 0 —— 留白归零在这种满屏布局里就是内容贴到圆角上。 */
+  padding-left: max(var(--space-page), env(safe-area-inset-left));
+  padding-right: max(var(--space-page), env(safe-area-inset-right));
+  padding-top: max(var(--space-page), env(safe-area-inset-top));
+  padding-bottom: max(var(--space-inner), env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--space-card);
@@ -62,6 +68,9 @@ button {
   font: inherit;
   color: inherit;
   cursor: pointer;
+  /* 两条都给：先字面值兜住不加载 js/theme.js 的路径（离线首帧、纯静态预览），
+     再由令牌覆盖。--touch-min 的值就是 44（js/theme.js:57），不是另一套尺寸。 */
+  min-height: 44px;
   min-height: var(--touch-min);
   border-radius: var(--radius-button);
   border: 1px solid var(--line);
@@ -94,8 +103,9 @@ button.link {
   border: 0;
   background: none;
   color: var(--ink-faint);
-  padding: 0 4px;
-  min-height: 0;
+  padding: 11px 8px;
+  /* 页脚那个"清空存档"也是按得着的控件，不给它豁免：文字保持 12px 的小，命中区靠 padding 撑到 44。 */
+  min-height: 44px;
   text-decoration: underline;
   font-size: 12px;
 }
