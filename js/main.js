@@ -143,7 +143,10 @@ function flushResume() {
 }
 
 function startClock() {
-  paused = false;   // 新一局从"没暂停"开始；setPaused(false) 走的就是这条路
+  // 这里只摆表，不碰 paused。以前它会顺手 paused = false，于是"解冻"有两条路：走 setPaused 的那条
+  // 会重画按钮，直接调 startClock 的那条只把按钮留在「继续」上——盘面已经能画了，按钮却还写着继续，
+  // 玩家按下去变成"再暂停一次"。冻 / 解冻归 paused 一个人管，解冻那一侧只有 adoptFreshBoard() 和
+  // setPaused(false) 两处，它们都画按钮。
   startedAt = Date.now();
   clearInterval(ticker);
   ticker = setInterval(() => {
@@ -162,6 +165,7 @@ function stopClock() {
 // The brush a drag paints with. A tap still cycles, so the brush is only half the gesture story.
 function setMode(value) {
   if (!game) return;
+  if (blockedWhilePaused('换画笔')) return;
   game.mode = value;
   for (const [id, v] of [['#btn-mode-black', BLACK], ['#btn-mode-white', WHITE], ['#btn-mode-erase', UNKNOWN]]) {
     $(id).setAttribute('aria-pressed', String(v === value));
@@ -242,6 +246,7 @@ function afterStep(soundValue) {
 
 function useHint() {
   if (!game || game.status === 'won') return null;
+  if (blockedWhilePaused('提示')) return null;
   const before = game.hints;
   const info = game.hint();
   if (!info) return null;
@@ -257,6 +262,7 @@ function useHint() {
 
 function undo() {
   if (!game) return null;
+  if (blockedWhilePaused('撤销')) return null;
   const step = game.undo();
   if (!step) return null;
   clearPulse();
@@ -274,7 +280,11 @@ function begin({ tier = TIERS[0].key, seed = null, resume = null } = {}) {
   clearPulse();
   stroke = null;
   el.winVeil.hidden = true;
-  baseElapsed = 0;
+  // 解冻必须排在下面那些写手之前，而且排在这条 `if (!puzzle) return null` 之后（见本函数第二行）：
+  // 上一局的 paused 如果留着，新盘的默认画笔 setMode(BLACK) 会被冻盘那条闸挡掉，状态行还要谎报
+  // "换画笔没有落地"；按钮也继续写着「继续」，玩家看到的是一把解不开的死锁。放在"不起新局"那条
+  // 出口之后，是因为那条出口屏幕上还是上一局那块盘——抹它的表和它的冻，等于给旧盘解冻并把表清零。
+  adoptFreshBoard();
   // A save that does not fit the board it is being replayed onto is dropped whole: the run starts
   // clean rather than resuming a shifted picture with someone else's clock on it.
   const sheet = resume ? Store.resumeBoard(game.board.n) : null;
@@ -396,6 +406,8 @@ function strokeStart(ev) {
   const t = view.hitCell(ev.clientX, ev.clientY);
   if (t < 0) return;
   ev.preventDefault();
+  // 挡在命中之后：只有真按到格子的一刀才被记成一笔挡刀，按在棋盘外不谎报。
+  if (blockedWhilePaused('这一笔')) return;
   el.canvas.setPointerCapture?.(ev.pointerId);
   clearPulse();
   // The right-button gesture is the eraser: sweeping over your own ink to clear it is the one thing
@@ -421,6 +433,13 @@ function strokeEnd() {
   if (!stroke || !game) return null;
   const s = stroke;
   stroke = null;
+  // 拖到一半被暂停（一只手压着鼠标、另一只手按 P 是真做得到的一件事）：这一笔整个作废，
+  // 预览擦回去之后不提交 —— 冻住的盘面不能因为"手势开始于解冻时"就从缝里收下这一笔。
+  if (paused) {
+    unpreview(s);
+    blockedWhilePaused('拖到一半的那一笔');
+    return null;
+  }
   const cells = s.items.map((it) => it.cell);
   // The stroke it is un-painting has already been detached from the module state above, so it has to
   // be handed over explicitly: `unpreview()` would read the now-null global and throw before the
@@ -523,12 +542,14 @@ const surface = {
   // here has driven the real state machine rather than a copy of it.
   stroke(cells, value) {
     if (!game) return null;
+    if (blockedWhilePaused('台面那一笔')) return null;
     const step = game.stroke(cells, value === undefined ? game.mode : value);
     if (step) afterStep(step.value);
     return step;
   },
   tap(t, value) {
     if (!game) return null;
+    if (blockedWhilePaused('台面那一格')) return null;
     const step = value === undefined ? game.tap(t) : game.stroke([t], value);
     if (step) afterStep(step.value);
     else syncAll();
@@ -536,13 +557,21 @@ const surface = {
   },
   solveWithLogic() {
     if (!game) return null;
+    // 台面这三条写入路绕过了 pointer 与按钮，浏览器腿点不到玩家点不到的东西，却调得到它们。
+    // 冻盘要挡的是"盘面被改"这件事本身，所以闸得装在离状态机最近的地方，而不是只装在控件后面。
+    if (blockedWhilePaused('台面推演')) return null;
     const r = game.solveWithLogic();
     syncAll();
     if (game.status === 'won') onWin();
     return r;
   },
   elapsed: clock,
-  state: () => (game ? { ...game.state(), elapsedMs: clock() } : null),
+  state: () => (game ? { ...game.state(), elapsedMs: clock(), paused } : null),
+  paused: isPaused,
+  setPaused,
+  togglePause,
+  // 闸要把"每一刀都被点名"当成证据读，所以它得能被外面数到：count 是这一页活到现在挡下的刀数。
+  blocked: () => ({ count: blocked.count, last: blocked.last }),
   cellAt: (x, y) => (game ? game.cellAt(x, y) : -1),
   valueOf: (t) => (game ? game.valueOf(t) : UNKNOWN),
   valueName,
@@ -651,32 +680,69 @@ window.tapa = surface;
   sync();
 })();
 
-// ---- 暂停：真的把仿真冻住 ----
+// ---- 暂停：冻住的是两样东西，时钟和盘面 ----
 //
-// 本仓唯一持续推进的仿真是耗时时钟（startedAt 跟 Date.now 走，ticker 是它唯一心跳）。
-// setPaused(true) 调 stopClock()：baseElapsed 落账、startedAt 归 0、ticker 停，
-// 此后 clock() 恒等于 baseElapsed，墙钟再走多久都加不上去。
+// 只停表不停盘，暂停就是一段免费的思考时间：本仓的纪录同档先比提示次数、再比步数、最后才比 `ms`
+// （js/store.js:157-164 `recordBest`），而 `#stat-time` 那一格是从同一个 `clock()` 读出来的。
+// 按下暂停、慢慢想、想完按继续再一路画到赢，落进存档的是扣掉了思考时间的 `ms`——榜上那个数
+// 就不再是玩家花掉的时间。所以这里必须两件事都做到：
+// ① 停表：setPaused(true) 调 stopClock()——baseElapsed 落账、startedAt 归 0、ticker 停，
+//    此后 clock() 恒等于 baseElapsed，墙钟再走多久也加不上去。
 // setPaused(false) 调 startClock()：startedAt 复位成"从现在起"，
 // 所以恢复后的第一帧不会把暂停期间憋下的墙钟一次性灌进来（没有 dt 尖峰）。
+// ② 冻盘：闸装在写手身上（blockedWhilePaused），不装在输入设备上 —— 这一笔 / 拖到一半的那一笔 /
+//    撤销 / 提示 / 换画笔，以及台面直接改盘的 stroke·tap·solveWithLogic 三条，每一个写盘的动作都先
+//    退回再动手。键盘那一路（H/Z/B/W/E，js/main.js:509 那个 listener）本来就走的就是这几个函数，
+//    所以它继承同一把闸，并且和按钮一样得到一句解释；如果在 listener 上整体挡掉，玩家按下 H 会什么
+//    反馈都拿不到。数字键 1-5 不在玩法里而在选档页（js/main.js:517 的 !el.viewMenu.hidden），它起的是
+//    新局：begin() 自己解冻、自己把表归零，记的是这块新盘真实花掉的时间，所以它不带一把闸。
+//    挡下来的原因写进 #state-line，不是把控件弄灰：弄灰的按钮玩家按下去得不到任何解释。
 //
 // 用 var 而不是 let：本块在文件末尾，而 startClock() 可能在它之前就被 begin() 调过；
 // let 声明提升不到初始化，TDZ 会直接抛 ReferenceError。
 var paused = false;
+function paintPauseButton() {
+  var b = document.getElementById('btn-pause');
+  if (!b) return;
+  b.setAttribute('aria-pressed', String(paused));
+  b.textContent = paused ? '继续' : '暂停';
+  b.title = paused ? '继续 (P)' : '暂停 (P)';
+}
 function setPaused(v) {
   v = !!v;
   if (v === paused) return paused;
   if (v) stopClock(); else startClock();
   paused = v;
-  var b = document.getElementById('btn-pause');
-  if (b) {
-    b.setAttribute('aria-pressed', String(paused));
-    b.textContent = paused ? '继续' : '暂停';
-    b.title = paused ? '继续 (P)' : '暂停 (P)';
-  }
+  paintPauseButton();
   return paused;
 }
 function togglePause() { return setPaused(!paused); }
 function isPaused() { return paused; }
+
+/** 新局接手盘面时才解冻：冻解除、表针归零、按钮跟着画对。
+ *
+ * 它必须排在 begin() 里 `if (!puzzle) return null` 那条出口**之后**：那条出口屏幕上还是上一局那块盘，
+ * 抹它的表和它的冻等于给旧盘解冻并把表清零，赢下去记的是一个偏小的 ms——而 ms 正是纪录的最后一个
+ * 比较位（js/store.js:157-164）。dosun 这一轮就踩过：重置写在 begin() 头上，浏览器腿全绿。
+ * 解冻又必须排在 setMode(BLACK) / startClock() 之前：冻着的盘会把新局的默认画笔挡在闸外，
+ * 状态行谎报"换画笔没有落地"，按钮还停在「继续」。 */
+function adoptFreshBoard() {
+  paused = false;
+  baseElapsed = 0;
+  paintPauseButton();
+}
+
+// 每一次被挡下来的操作都记账：闸要的正是"这一刀确实撞在墙上并被点名"，而不是"界面看起来没动"。
+// 只数这一轮真被挡的（paused 为假时返回 false，什么都不写），所以它不会把正常操作也算成挡刀。
+var blocked = { count: 0, last: '' };
+function blockedWhilePaused(what) {
+  if (!paused) return false;
+  blocked.count++;
+  blocked.last = what;
+  syncAll();
+  el.stateLine.textContent = `已暂停：${what}没有落地。暂停冻住表针，也冻住盘面 —— 按「继续」(P 或空格) 再继续。`;
+  return true;
+}
 
 document.getElementById('btn-pause').addEventListener('click', togglePause);
 window.addEventListener('keydown', function (ev) {

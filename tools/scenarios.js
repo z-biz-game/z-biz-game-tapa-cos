@@ -1174,6 +1174,211 @@
     return report({ restored: saved.cell.split(',').filter((v) => v !== '2').length, hints: saved.hints, moves: saved.moves });
   };
 
+  // ---------- pause (the frozen window) ----------
+  // 暂停冻住的是两样东西：表针，和盘面。只停表不停盘，暂停就是一段免费的思考时间 —— 本仓的纪录同档
+  // 先比提示次数、再比步数、最后比 ms（js/store.js:157-164），所以"能白想 2 秒"会直接写进榜上那个数。
+  // 这一腿按真按钮、发真 pointer / KeyboardEvent，读的是玩家看得见的东西：#state-line 的说法、画布像素、
+  // 墙钟走过 2.1 秒之后 elapsed() 加了几个数；blocked 只数真被挡下的那一刀，是把"漏挂一把闸"逼成红的账。
+  const pause = async () => {
+    const en = E();
+    await wipe();
+    const g = await open('easy', 'scen|pause');
+    const board = () => Array.from(A().game.st.cell).join(',');
+    const cells = [...Array(g.board.n).keys()].filter((t) => g.st.cell[t] === en.UNKNOWN).slice(0, 5);
+    const key = (k) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+
+    // 先证明这把表本来会走：一把从没走过的表，"停住了"是句空话。
+    const t0 = A().elapsed();
+    await wait(1100);
+    ck('没暂停时表在走', A().elapsed() > t0, `${t0} -> ${A().elapsed()}`);
+    ck('暂停按钮按得到（有命中盒）', $('#btn-pause').getClientRects().length > 0, String($('#btn-pause').getClientRects().length));
+    eq('开局按钮写着暂停', text('#btn-pause'), '暂停');
+    eq('开局按钮不是按下态', $('#btn-pause').getAttribute('aria-pressed'), 'false');
+
+    $('#btn-pause').click();
+    await wait(40);
+    eq('按一次变成继续', text('#btn-pause'), '继续');
+    eq('按一次报出按下态', $('#btn-pause').getAttribute('aria-pressed'), 'true');
+    eq('状态里带着暂停', A().state().paused, true);
+    ck('暂停不切屏', shown('#view-game'));
+
+    const pin = {
+      board: board(), blacks: text('#stat-blacks'), whites: text('#stat-whites'),
+      moves: text('#stat-moves'), hints: text('#stat-hints'), time: text('#stat-time'),
+      pixel: centrePixel(cells[0]), mode: $('#board').dataset.mode,
+    };
+    const tPause = A().elapsed();
+    const base = A().blocked().count;
+
+    // 玩家手里每一条写盘的路：两只指针、五个玩法键、三个按钮、三条台面函数。
+    const cuts = [
+      { name: '左键点一格', label: '这一笔', run: () => tap(cells[1]) },
+      { name: '右键点一格', label: '这一笔', run: () => tap(cells[1], 2) },
+      { name: '拖一笔', label: '这一笔', run: () => drag(cells[1], cells[2]) },
+      { name: 'H 键', label: '提示', run: () => key('h') },
+      { name: 'Z 键', label: '撤销', run: () => key('z') },
+      { name: 'B 键', label: '换画笔', run: () => key('b') },
+      { name: 'W 键', label: '换画笔', run: () => key('w') },
+      { name: 'E 键', label: '换画笔', run: () => key('e') },
+      { name: '提示按钮', label: '提示', run: async () => $('#btn-hint').click() },
+      { name: '撤销按钮', label: '撤销', run: async () => $('#btn-undo').click() },
+      { name: '白画笔按钮', label: '换画笔', run: async () => $('#btn-mode-white').click() },
+      { name: '台面那一格', label: '台面那一格', run: async () => A().tap(cells[1]) },
+      { name: '台面那一笔', label: '台面那一笔', run: async () => A().stroke([cells[1]], en.BLACK) },
+      { name: '台面提示', label: '提示', run: async () => A().useHint() },
+      { name: '台面撤销', label: '撤销', run: async () => A().undo() },
+      { name: '台面换画笔', label: '换画笔', run: async () => A().setMode(en.WHITE) },
+      { name: '台面推演', label: '台面推演', run: async () => A().solveWithLogic() },
+    ];
+    for (let i = 0; i < cuts.length; i++) {
+      const c = cuts[i];
+      await c.run();
+      await wait(26);
+      eq(`${c.name}被挡下且点了名`, A().blocked().last, c.label, `last=${A().blocked().last}`);
+      eq(`${c.name}只挡一刀`, A().blocked().count, base + i + 1);
+      eq(`${c.name}之后盘面没动`, board(), pin.board);
+      ck(`${c.name}之后状态行在解释`, text('#state-line').includes(c.label), text('#state-line'));
+    }
+    eq('挡刀总数等于名册长度', A().blocked().count - base, cuts.length);
+    eq('暂停期间不动画笔', $('#board').dataset.mode, pin.mode);
+
+    // 墙钟真走 2.1 秒：这一条是整腿的落点，冻住的窗口里 elapsed() 一个数都不该加。
+    await wait(2100);
+    eq('冻住的 2.1 秒里表针没加', A().elapsed() - tPause, 0);
+    eq('时间那格没跳', text('#stat-time'), pin.time);
+    eq('黑格数没跳', text('#stat-blacks'), pin.blacks);
+    eq('白格数没跳', text('#stat-whites'), pin.whites);
+    eq('步数没跳', text('#stat-moves'), pin.moves);
+    eq('提示数没跳', text('#stat-hints'), pin.hints);
+    ck('画面一个像素都没改', near(centrePixel(cells[0]), pin.pixel, 0), `${pin.pixel} -> ${centrePixel(cells[0])}`);
+
+    // 只读的那一路不能一起挡死：暂停是让人想的，不是让人看不见盘的。
+    ck('暂停里仍然读得到盘面', A().valueOf(cells[0]) >= 0, String(A().valueOf(cells[0])));
+    ck('暂停里仍然读得到几何', A().view.cellRect(cells[0]).size > 0);
+    // 按在棋盘外（padding 之外）不是一刀：闸若装在 hitCell 之前，一次空按也会被记成"挡下了一笔"。
+    const offBefore = A().blocked().count;
+    const cbox = A().view.canvas.getBoundingClientRect();
+    pointer('pointerdown', cbox.left - 8, cbox.top - 8);
+    pointer('pointerup', cbox.left - 8, cbox.top - 8);
+    await wait(26);
+    eq('棋盘外那一按不记账', A().blocked().count, offBefore);
+    eq('棋盘外那一按也不改盘', board(), pin.board);
+
+    $('#btn-pause').click();
+    await wait(40);
+    const tResume = A().elapsed();
+    // 这条量的不是"40ms 的等待"，是"补灌 2100ms 的冻结窗口"这一整类：startClock() 如果把 startedAt
+    // 留在旧值上，解冻后的第一帧就会一次性把墙钟灌进来，读数直接过 2100。界限放在 1000 是为了在满载
+    // 机器上也不误报，同时离两个假设（约 40 vs ≥2100）都还远。
+    ck('解冻后的第一帧不补灌冻结期间的墙钟', tResume - tPause < 1000, `${tResume - tPause} ms`);
+    eq('再按一次回到暂停字样', text('#btn-pause'), '暂停');
+    eq('按钮松开', $('#btn-pause').getAttribute('aria-pressed'), 'false');
+    eq('状态里不再暂停', A().state().paused, false);
+
+    // 解冻之后同一批刀必须落地，否则这把闸挡的就不是"暂停期间写盘"，而是整局游戏。
+    // 这一格挑的是"解里就是黑"的一格：tap 循环把未知染成黑，染错色的盘会让后面的逻辑推演带着矛盾
+    // 停下来，那就变成另一条断言在失败了。
+    const inkCell = [...Array(g.board.n).keys()].find((t) => g.st.cell[t] === en.UNKNOWN && g.puzzle.solution[t] === en.BLACK);
+    const beforeInk = A().blocked().count;
+    await tap(inkCell);
+    ck('解冻后同一刀落进盘面', board() !== pin.board, board());
+    eq('解冻后不再记账', A().blocked().count, beforeInk);
+    key('h');
+    await wait(50);
+    eq('解冻后 H 键给提示', text('#stat-hints'), String(Number(pin.hints) + 1));
+    $('#btn-mode-white').click();
+    await wait(30);
+    eq('解冻后能换画笔', $('#board').dataset.mode, 'white');
+    const res = A().solveWithLogic();
+    eq('解冻后一路推得到赢', A().game.status, 'won', JSON.stringify(res));
+    // 停表与冻盘必须成对：纪录里的 ms 既不能把冻结的 2.1 秒算进去（那才是"惩罚按暂停"），
+    // 也不能比暂停前还短（那是把可动时间洗掉）。两头一起卡，才是"每一毫秒都对应盘面能动的时间"。
+    const rec = en.Store.best('easy');
+    ck('赢下来的纪录进了榜', !!rec, JSON.stringify(rec));
+    ck('纪录 ms 不早于暂停前的可动时间', !!rec && rec.ms >= tPause, `${rec && rec.ms} vs ${tPause}`);
+    ck('纪录 ms 不含冻结的那 2.1 秒', !!rec && rec.ms - tPause < 1200, `${rec && rec.ms - tPause} ms 额外`);
+
+    // 暂停没解冻就换一局：新盘必须能画。冻着的手会把新局的默认画笔挡在闸外，玩家看到的是一把死锁。
+    await open('medium', 'scen|pause|newgame');
+    $('#btn-pause').click();
+    await wait(30);
+    eq('新局之前确实冻着', A().state().paused, true);
+    $('#btn-new').click();
+    await wait(150);
+    eq('换一局接手新盘就解冻', A().state().paused, false);
+    eq('换一局把按钮画对', text('#btn-pause'), '暂停');
+    eq('换一局松开按下态', $('#btn-pause').getAttribute('aria-pressed'), 'false');
+    eq('换一局换到了另一档的盘', A().game.puzzle.tier, 2);
+    const b2 = board();
+    eq('新盘的默认画笔是黑', $('#board').dataset.mode, 'black');
+    await tap(0);
+    ck('解冻后新局第一刀就落得下', board() !== b2, board());
+    ck('新局不带着上一局的表', A().elapsed() < 1000, `${A().elapsed()} ms`);
+    eq('新局的步数是干净的', A().game.moves, 1);
+
+    // 一只手压着鼠标、另一只手按 P：拖到一半的那一笔整个作废，不能从缝里收下。
+    const pin3 = board();
+    const b3 = A().blocked().count;
+    const a = at(3);
+    const b = at(4);
+    pointer('pointerdown', a.x, a.y);
+    pointer('pointermove', (a.x + b.x) / 2, (a.y + b.y) / 2);
+    key('p');
+    await wait(30);
+    eq('半路真的暂停了', A().state().paused, true);
+    pointer('pointermove', b.x, b.y);
+    pointer('pointerup', b.x, b.y);
+    await wait(30);
+    eq('拖到一半的那一笔被点名', A().blocked().last, '拖到一半的那一笔');
+    eq('拖到一半只挡一刀', A().blocked().count, b3 + 1);
+    eq('这一笔整个作废（预览擦回去了）', board(), pin3);
+
+    // 还冻着就回选档，再从继续卡回来：存档里那个 ms 必须正好是冻住的那个数（不停表的写法会在这里
+    // 把冻结期间的墙钟一起写进档），而回来之后必须解冻、按钮必须画对 —— 带着"继续"字样回到能画的盘，
+    // 和带着"暂停"字样回到冻死的盘，都是这一轮要堵的形状。
+    const tMenu = A().elapsed();
+    eq('回选档之前还冻着', A().state().paused, true);
+    $('#btn-menu').click();
+    await wait(80);
+    ck('暂停中也能回选档', shown('#view-menu'));
+    ck('继续卡还挂着', shown('#resume-card'));
+    eq('存档写的就是冻住的那个数', en.Store.resume().elapsedMs, tMenu);
+    // 选档屏上真待 2.5 秒：把"漏表"的那条假设推得离"没漏"越远，界限越不像是在迁就机器速度。
+    await wait(2500);
+    $('#btn-resume').click();
+    await wait(150);
+    eq('回来之后不再冻着', A().state().paused, false);
+    eq('回来的按钮写着暂停', text('#btn-pause'), '暂停');
+    eq('回来的按钮是松开态', $('#btn-pause').getAttribute('aria-pressed'), 'false');
+    eq('回来还是同一块盘', board(), pin3);
+    ck('接上的表不含选档屏上的 2.5 秒', A().elapsed() - tMenu < 1000, `${A().elapsed()} vs ${tMenu}`);
+    const b4 = board();
+    await tap(6);
+    ck('回来之后画得动', board() !== b4, board());
+
+    // 代码形状：这一轮修的就是"重置写在 begin() 头上"。浏览器腿到不了那条"没出货"的出口
+    // （generate 有 300 次尝试预算，够不着确定的空窗），所以这一条只能由源码形状来守。
+    const src = await (await fetch(`${new URL('js/main.js', document.baseURI).href}?pause=${Date.now()}`)).text();
+    const lineOf = (re) => src.split('\n').map((l, i) => (re.test(l) ? i + 1 : 0)).filter(Boolean);
+    const bail = lineOf(/^ {2}if \(!puzzle\) return null;$/);
+    const adopt = lineOf(/^ {2}adoptFreshBoard\(\);$/);
+    eq('begin() 只有一处"没出货"出口', bail.length, 1);
+    eq('begin() 只有一处接手新盘的重置', adopt.length, 1);
+    ck('重置排在出口之后（不给旧盘解冻）', adopt[0] > bail[0], `${bail} -> ${adopt}`);
+    const clockBody = (src.match(/^function startClock\(\) \{[\s\S]*?\n\}/m) || [''])[0];
+    // 先剥注释再看代码：这一轮改动的说明就写在 startClock() 里，"它以前会顺手 paused = false"那句
+    // 如果按原样扫，形状闸会把解释当成被禁止的事实。
+    const clockCode = clockBody.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    ck('startClock() 不顺手解冻（解冻只有两处）', !/paused\s*=[^=]/.test(clockCode), clockCode.split('\n').slice(0, 3).join(' | '));
+    for (const fn of ['setMode', 'useHint', 'undo', 'strokeStart', 'strokeEnd']) {
+      const body = (src.match(new RegExp(`^function ${fn}\\([\\s\\S]*?\\n\\}`, 'm')) || [''])[0];
+      ck(`${fn} 带着冻盘闸`, /blockedWhilePaused/.test(body), fn);
+    }
+    eq('台面三条写入路都带闸', lineOf(/^ {4}if \(blockedWhilePaused\('台面/).length, 3);
+    // 报的数都取自"暂停之前到赢下来"那一段：后面几步换过盘，A().elapsed() 已经是另一局的表。
+    return report({ cuts: cuts.length, blocked: A().blocked().count, blockedBase: base, recordedMs: rec ? rec.ms : -1, extraMs: rec ? rec.ms - tPause : -1 });
+  };
+
   // ---------- layout (geometry, the 11×11, and the readouts the picture has to support) ----------
   const layout = async () => {
     const en = E();
@@ -1347,5 +1552,5 @@
     return report({ cell: geo.cell, dpr: geo.dpr, clues: b.clues, hints: g.hints, steps: res.steps });
   };
 
-  w.__sc = { engine, gen, library, play, ink, hint, conflict, zero, save, resume, layout };
+  w.__sc = { engine, gen, library, play, ink, hint, conflict, zero, save, resume, pause, layout };
 })(window);
