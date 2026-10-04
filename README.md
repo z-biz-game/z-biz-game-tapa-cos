@@ -116,12 +116,17 @@ npm run electron     # 桌面壳（electron/main.cjs，同一份代码，无构�
   凡 `verify()` 看得见破法的盘面，廉价扫已经先判了无解（`js/ui/game.js:56-63` 把两者放在一起）。
   → 破法**条数**只走 `#stat-conflicts`（`js/main.js:123`），守它的是
   `tools/scenarios.js:932`「状态行不报处数（处数那一支在真实行为里到不了）」。
-- **不承诺"每个可点的东西都不小于 44 px"**。44 的下限写在 CSS 的 `button` 上
-  （`css/game.css:61-70` 的 `min-height: var(--touch-min)`），并且**只有一条明写的豁免**：
-  `button.link`（`css/game.css:93-100`，`min-height: 0` + 12px 字）——全仓只有页脚「清空存档」
-  一个控件戴这个 class，`tools/scenarios.js:1287`「全屏只有清空存档豁免 44」就是钉这一件事。
+- **不承诺"每个可点的东西都不小于 44 px"**。44 的下限有两处：组件自己那句
+  （`css/game.css:61-70` 的 `min-height: var(--touch-min)`），以及手机轮补的硬下限
+  （`css/game.css:443-455`，`min-height/min-width: 44px !important`，覆盖 `button:not(.link)`
+  / `select` / `input` / `textarea` / `a[href]` / `[role="button"]`）。带 !important 的那条会
+  无条件盖掉组件规则，所以**豁免必须在它自己的选择器里写出来**，而不是只靠组件那句 `min-height: 0`。
+  全仓**只有一条明写的豁免**：`button.link`（`css/game.css:93-100`，`min-height: 0` + 12px 字），
+  只有页脚「清空存档」一个控件戴这个 class，`tools/scenarios.js:1294`「全屏只有清空存档豁免 44」
+  与 `:1290`「豁免的那条链接确实小过 44（豁免不是空集）」钉的就是这一件事——
+  后者是反空转：把豁免改成摆设（选择器不再跳过它）时，红的是这一条而不是那条名册。
   量法也照实写：`layout` 场景对 `#app button` 里**有 client rects** 的逐个 `getBoundingClientRect`、
-  两轴都取整比较，并把名册按 id 钉死（`tools/scenarios.js:1264-1283`）。
+  两轴都取整比较，并把名册按 id 钉死（`tools/scenarios.js:1268-1287`；棋局屏 11 条、选档屏 10 条）。
   **画布里的格子不是 DOM 控件**，走的是另一套下限：边长 `Cell.min 26 … Cell.max 64`
   （`js/theme.js:79`），`layout` 断的是这个区间；900×900 验证窗口下 11×11 实测每格 44 px，
   那是**读数不是承诺**——窗口更小时它就是 26。
@@ -257,7 +262,7 @@ js/render/board.js      几何 + 绘制 + 命中（八个方位锚点与虚线�
 js/store.js             localStorage 单键存档：RLE 墨水 + 形状清洗 + 隐私模式存活
 js/theme.js             令牌单一来源；CSS 变量与画布读同一份
 js/audio/synth.js       WebAudio 合成落子/提示/冲突/胜利四种音
-tools/                  engine-test / balance / bake / playtest(CDP) / scenarios / verify.sh / tools/assemble-site / tools/deploy-set / tools/deploy-set-selftest
+tools/                  engine-test / balance / bake / playtest(CDP) / scenarios / verify.sh / assemble-site.sh / deploy-set.mjs / deploy-set-selftest.mjs
 server.cjs              零依赖静态服务（5312）
 electron/               桌面壳（同一份代码，无构建）
 tools/assemble-site.sh  部署产物的唯一清单（pages.yml 与本地闸调同一支）

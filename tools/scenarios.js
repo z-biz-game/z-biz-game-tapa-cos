@@ -1279,11 +1279,12 @@
     const linkRoster = () => [...document.querySelectorAll('#app button.link')].map((x) => x.id).sort().join(',');
     const who = (x) => x.id || (x.classList.contains('tier') ? `档位卡:${x.dataset.tier}` : x.className);
     const touchRoster = () => liveButtons().filter((x) => !x.classList.contains('link')).map(who).join(',');
-    // Measured roster on the board screen with no overlay up: the header's two toggles, the three
-    // brush modes and the four action buttons — nine targets that all carry css/game.css:65's
-    // `min-height: var(--touch-min)`, plus the footer's exempt text link. Pinned by id, so a control
-    // that disappears (or a new one that never clears 44) fails here instead of sliding the floor down.
-    const GAME_TARGETS = ['btn-sound', 'btn-motion', 'btn-mode-black', 'btn-mode-white', 'btn-mode-erase', 'btn-hint', 'btn-undo', 'btn-new', 'btn-menu'];
+    // Measured roster on the board screen with no overlay up: the header's four buttons (音效 / 动效
+    // / 暂停 / 全屏), the three brush modes and the four action buttons — eleven targets that all
+    // carry css/game.css:65's `min-height: var(--touch-min)`, plus the footer's exempt text link.
+    // Pinned by id, so a control that disappears (or a new one that never clears 44) fails here
+    // instead of sliding the floor down.
+    const GAME_TARGETS = ['btn-sound', 'btn-motion', 'btn-pause', 'btn-fullscreen', 'btn-mode-black', 'btn-mode-white', 'btn-mode-erase', 'btn-hint', 'btn-undo', 'btn-new', 'btn-menu'];
     eq('棋局屏上的目标名册', touchRoster(), GAME_TARGETS.join(','));
     eq('棋局屏上没有到不了的目标', tooSmall().join(' | '), '');
     ck('豁免的那条链接确实小过 44（豁免不是空集）', (() => {
@@ -1298,7 +1299,7 @@
     // and the 继续 button. That is the roster the 44 floor is read over; the same button is
     // re-measured by id in the resume scenario, which is the one that plays the save.
     const menuTouch = liveButtons().filter((x) => !x.classList.contains('link'));
-    eq('选档屏上的目标名册', touchRoster(), 'btn-sound,btn-motion,档位卡:newbie,档位卡:easy,档位卡:medium,档位卡:hard,档位卡:master,btn-resume');
+    eq('选档屏上的目标名册', touchRoster(), 'btn-sound,btn-motion,btn-pause,btn-fullscreen,档位卡:newbie,档位卡:easy,档位卡:medium,档位卡:hard,档位卡:master,btn-resume');
     eq('选档屏上没有到不了的目标', tooSmall().join(' | '), '');
     eq('档位卡是按 TIERS 的五档排的', menuTouch.filter((x) => x.classList.contains('tier')).length, 5);
     A().show('game');

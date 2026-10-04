@@ -345,10 +345,15 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 
 **44 是 DOM 按钮的承诺，不是画布格子的承诺。** `css/game.css:61-71` 给 `button` 上
 `min-height: var(--touch-min)`（那句在 `:65`，注释在 `:59-60`），`js/theme.js:57` `Touch = { min: 44 }`；
+手机轮又补了一条硬下限 `css/game.css:443-455`（`44px !important`，选择器是
+`button:not(.link)` / `select` / `input` / `textarea` / `a[href]` / `[role="button"]`）——
+带 !important 的那条盖过一切组件规则，所以豁免只能写在它自己的选择器里，
+`button.link` 之所以还真的是豁免，靠的是这个 `:not(.link)`，不是 `css/game.css:93-100` 那句 `min-height: 0`。
 全屏唯一一处豁免是 `button.link`（`css/game.css:93-100`，`min-height: 0` + 12px），
-而且**按 id 钉死**：**全屏只有清空存档豁免 44** = `btn-reset`（`tools/scenarios.js:1293`），
-棋局屏的九条名册与选档屏的八条名册各自有一条 `eq` 盯着（`:1287`、`:1301`），
-测量方法是逐个 `getBoundingClientRect()`、两轴都算、只量有 client rect 的控件（`:1268-1284`）。
+而且**按 id 钉死**：**全屏只有清空存档豁免 44** = `btn-reset`（`tools/scenarios.js:1294`），
+另有 `:1290` 那条反空转盯着"豁免确实小过 44"（把 `:not(.link)` 改回 `button` 时红的是它）。
+棋局屏的十一条名册与选档屏的十条名册各自有一条 `eq` 盯着（`:1288`、`:1302`），
+测量方法是逐个 `getBoundingClientRect()`、两轴都算、只量有 client rect 的控件（`:1268-1287`）。
 画布上的格走另一套下限：`js/theme.js:79` `Cell = { min: 26, max: 64, … }`，
 `play`/`layout` 场景在 900×900 视口下读到的 cell 是 44 px、`ink` 场景读到 64——**这些是读数不是承诺**。
 
