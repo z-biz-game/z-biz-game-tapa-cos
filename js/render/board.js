@@ -81,11 +81,17 @@ export class BoardView {
 
   hitCell(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
-    const { cell, x, y } = this.geo;
+    const { cell, x, y, w, h } = this.geo;
     const game = this.game;
     if (!cell || !game) return -1;
-    const px = clientX - rect.left - x;
-    const py = clientY - rect.top - y;
+    // 命中要用 rect 与画布 CSS 尺寸的比值把坐标折回画布内部：浏览器缩放、Electron 的
+    // zoomFactor、将来给 #board 加 max-width，都会让 rect 宽 ≠ geo.w —— 那时按 cell 直接除
+    // 就是一门比一格宽，玩家点到的永远是邻居（简报点名的"点 A 打 B"）。
+    if (!rect.width || !rect.height) return -1;
+    const sx = w / rect.width;
+    const sy = h / rect.height;
+    const px = (clientX - rect.left) * sx - x;
+    const py = (clientY - rect.top) * sy - y;
     if (px < 0 || py < 0) return -1;
     const gx = Math.floor(px / cell);
     const gy = Math.floor(py / cell);

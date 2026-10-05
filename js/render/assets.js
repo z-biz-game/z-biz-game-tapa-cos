@@ -14,17 +14,36 @@ const MOTIFS = {
 
 const loaded = new Map();
 let requested = false;
+let readyHook = null;
 
-export function loadMotifs() {
+// 解码完成之后必须有人再画一次：静态盘面下帧循环只给 pulse/墨点重画（js/main.js 的
+// `if (pulse || fx.active()) draw()`），而贴图一般在那之后才解码完 —— 于是三张母题 PNG
+// 全在盘上却一张都不出现，要到玩家下一次落墨才看见。这里数到三张都 settle 就通知一次。
+export function loadMotifs(onReady) {
+  if (typeof onReady === 'function') readyHook = onReady;
   if (requested || typeof Image !== 'function') return;
   requested = true;
+  let pending = Object.keys(MOTIFS).length;
+  const settle = () => {
+    if (--pending > 0) return;
+    if (typeof readyHook === 'function') readyHook();
+  };
   for (const [name, src] of Object.entries(MOTIFS)) {
     const img = new Image();
     img.decoding = 'async';
-    img.onerror = () => loaded.delete(name);
+    img.onload = settle;
+    img.onerror = () => {
+      loaded.delete(name);
+      settle();
+    };
     img.src = src;
     loaded.set(name, img);
   }
+}
+
+// 注册"贴图落地"之后的重画回调：回调在 loadMotifs 之前挂也认（启动顺序就是先挂再请）。
+export function onMotifsReady(fn) {
+  readyHook = typeof fn === 'function' ? fn : null;
 }
 
 // `complete && naturalWidth` is the readiness test that survives every environment: under a test

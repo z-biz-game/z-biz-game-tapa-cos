@@ -12,7 +12,7 @@ import * as Engine from './engine/tapa.js';
 import { analyze } from './engine/count.js';
 import { BoardView, pulsePhase } from './render/board.js';
 import { InkFx } from './render/fx.js';
-import { loadMotifs } from './render/assets.js';
+import { loadMotifs, onMotifsReady } from './render/assets.js';
 import { Game, valueName, hintLine, BLACK, WHITE, UNKNOWN } from './ui/game.js';
 
 const VERSION = '1.0.0';
@@ -517,24 +517,25 @@ function unpreview(s = stroke) {
   game.recompute();
 }
 
-function strokeStart(ev) {
-  if (!game || game.status === 'won' || paused) return;
-  const t = view.hitCell(ev.clientX, ev.clientY);
-  if (t < 0) return;
-  ev.preventDefault();
-  el.canvas.setPointerCapture?.(ev.pointerId);
+// 一次落笔的语义只写一遍：press 命中格子才开一笔，drag 只吃没画过的格，release 收笔并落账。
+// 指针、触摸、鼠标三种入口都汇到这里，否则三套手势会各自漂移出一套"点 A 打 B"的历史。
+function press(clientX, clientY, button) {
+  if (!game || game.status === 'won' || paused) return false;
+  const t = view.hitCell(clientX, clientY);
+  if (t < 0) return false;
   clearPulse();
   // The right-button gesture is the eraser: sweeping over your own ink to clear it is the one thing
   // a player reaches for before 撤销.
-  const value = ev.button === 2 ? UNKNOWN : game.mode;
+  const value = button === 2 ? UNKNOWN : game.mode;
   stroke = { items: [], value, anchor: t, moved: false };
   preview(t, value);
   draw();
+  return true;
 }
 
-function strokeMove(ev) {
+function drag(clientX, clientY) {
   if (!stroke || !game) return;
-  const t = view.hitCell(ev.clientX, ev.clientY);
+  const t = view.hitCell(clientX, clientY);
   // Sweeping back over the cell we started on must not un-travel the gesture: the stroke has already
   // painted cells, and committing it as a tap would throw them away.
   if (t < 0 || t === stroke.anchor || stroke.items.some((it) => it.cell === t)) return;
@@ -543,7 +544,7 @@ function strokeMove(ev) {
   draw();
 }
 
-function strokeEnd() {
+function release() {
   if (!stroke || !game) return null;
   const s = stroke;
   stroke = null;
@@ -567,16 +568,90 @@ function strokeEnd() {
   return step;
 }
 
-el.canvas.addEventListener('pointerdown', strokeStart);
-el.canvas.addEventListener('pointermove', strokeMove);
-el.canvas.addEventListener('pointerup', strokeEnd);
-el.canvas.addEventListener('pointercancel', () => {
+function cancelStroke() {
   if (!stroke) return;
   unpreview();
   stroke = null;
   syncAll();
-});
+}
+
+function strokeStart(ev) {
+  if (!game || game.status === 'won' || paused) return;
+  if (!press(ev.clientX, ev.clientY, ev.button)) return;
+  ev.preventDefault();
+  el.canvas.setPointerCapture?.(ev.pointerId);
+}
+
+function strokeMove(ev) {
+  drag(ev.clientX, ev.clientY);
+}
+
+function strokeEnd() {
+  return release();
+}
+
+// `touch-action: none` 已经在 css 上把滚动/双击缩放让给画布了；这里只负责把点转成手势。
+el.canvas.addEventListener('pointerdown', strokeStart);
+el.canvas.addEventListener('pointermove', strokeMove);
+el.canvas.addEventListener('pointerup', strokeEnd);
+el.canvas.addEventListener('pointercancel', cancelStroke);
 el.canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+// 回落：PointerEvent 缺席的环境（老 WebKit、无 polyfill 的旧安卓浏览器）里 `pointer*` 一支都
+// 不会触发，只有 pointerdown 的画布就是一块砖。这一支必须存在，但**只在没有 PointerEvent 时**
+// 注册 —— 两边都挂会把同一次触摸处理两遍（一笔变成两步，撤销也退不干净）。
+const hasPointer = typeof window !== 'undefined' && typeof window.PointerEvent === 'function';
+if (!hasPointer) {
+  const point = (ev) => (ev.touches && ev.touches.length ? ev.touches[0] : (ev.changedTouches || [])[0]) || ev;
+  let touchLive = false;
+  el.canvas.addEventListener(
+    'touchstart',
+    (ev) => {
+      const p = point(ev);
+      if (!p) return;
+      if (!press(p.clientX, p.clientY, 0)) return;
+      touchLive = true;
+      ev.preventDefault();
+    },
+    { passive: false }
+  );
+  el.canvas.addEventListener(
+    'touchmove',
+    (ev) => {
+      if (!touchLive) return;
+      const p = point(ev);
+      if (p) drag(p.clientX, p.clientY);
+      ev.preventDefault();
+    },
+    { passive: false }
+  );
+  const touchFinish = (ev) => {
+    if (!touchLive) return;
+    touchLive = false;
+    if (ev && ev.cancelable) ev.preventDefault();
+    release();
+  };
+  el.canvas.addEventListener('touchend', touchFinish);
+  el.canvas.addEventListener('touchcancel', () => {
+    touchLive = false;
+    cancelStroke();
+  });
+  // 鼠标回落给的是同一套 press/drag/release：右键当橡皮，和指针那条路径一字不差。
+  let mouseLive = false;
+  el.canvas.addEventListener('mousedown', (ev) => {
+    if (!press(ev.clientX, ev.clientY, ev.button)) return;
+    mouseLive = true;
+    ev.preventDefault();
+  });
+  el.canvas.addEventListener('mousemove', (ev) => {
+    if (mouseLive) drag(ev.clientX, ev.clientY);
+  });
+  window.addEventListener('mouseup', () => {
+    if (!mouseLive) return;
+    mouseLive = false;
+    release();
+  });
+}
 
 $('#btn-mode-black').addEventListener('click', () => setMode(BLACK));
 $('#btn-mode-white').addEventListener('click', () => setMode(WHITE));
@@ -680,6 +755,10 @@ window.addEventListener('pagehide', flushResume);
 
 applyThemeVars();
 applySettings();
+// 贴图解码完成往往晚于第一帧：不重画的话，纸纹/墨点/环这三张母题要等玩家下一次落墨才出现。
+onMotifsReady(() => {
+  if (game) draw();
+});
 loadMotifs();
 renderMenu();
 
