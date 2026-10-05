@@ -17,6 +17,10 @@ import { BLACK } from '../engine/tapa.js';
 import { motif } from './assets.js';
 
 const SIM_STEP = 1 / 120; // seconds of simulated time per step
+// 减法亏损不许吞掉一整个 SIM_STEP：`accum -= SIM_STEP` 在 30/60Hz 的帧长下每帧都留下
+// "只差 3e-18 就够再走一步"的零头，实测喂 500ms 只走 59 步（应为 60）——低帧率的动画就慢这一拍。
+// 1e-9 秒的容差比任何真实帧间隔小六个数量级，只把这点减法亏损判回"够一步"。
+const STEP_EPS = 1e-9;
 const MAX_STEPS_PER_FRAME = 8; // a backgrounded tab buys a catch-up budget, not an avalanche
 const GRAVITY = 620; // px/s² — ink falls, it does not float
 const DRAG_PER_SEC = 0.12; // velocity retained after one second of flight
@@ -101,7 +105,7 @@ export class InkFx {
     const dt = elapsedSeconds > 0 ? Math.min(elapsedSeconds, 0.25) : 0;
     this.accum += dt;
     let steps = 0;
-    while (this.accum >= SIM_STEP && steps < MAX_STEPS_PER_FRAME) {
+    while (this.accum + STEP_EPS >= SIM_STEP && steps < MAX_STEPS_PER_FRAME) {
       this.step(SIM_STEP);
       this.accum -= SIM_STEP;
       steps++;
