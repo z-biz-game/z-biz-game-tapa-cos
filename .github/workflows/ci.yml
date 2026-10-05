@@ -34,6 +34,12 @@ jobs:
       - name: Engine tests
         run: node tools/engine-test.mjs
 
+      # 静音是否真的挂起 AudioContext、暂停是否真的冻住仿真与计时、重开是否真的清零累加器、
+      # 脏档是否只丢那一条 —— 这些判据此前只有 browser job 兜着，而 browser job 要 Chrome + CDP，
+      # 本地随手跑不动就等于没人跑。ux-test 用 node 的沙箱把同一批行为直接判掉，一行 flag 都不要。
+      - name: UX behaviour tests (no browser)
+        run: node tools/ux-test.mjs
+
       # The ladder is a promise, not a caption: `TIERS[].band` is a selection target, and this
       # step goes red if a tier stops landing in its own band or the medians stop ordering.
       - name: Difficulty ladder is still measured
