@@ -788,15 +788,17 @@ const surface = {
   undo,
   setMode,
   // The harness commits through the same paths a pointer release does, so a scenario that passes
-  // here has driven the real state machine rather than a copy of it.
+  // here has driven the real state machine rather than a copy of it. That only holds if the gate is
+  // the same gate: `press()` refuses to open a stroke while 暂停, so these two must refuse too —
+  // otherwise a browser scenario can paint over a paused board and still report 暂停 生效.
   stroke(cells, value) {
-    if (!game) return null;
+    if (!game || paused) return null;
     const step = game.stroke(cells, value === undefined ? game.mode : value);
     if (step) afterStep(step);
     return step;
   },
   tap(t, value) {
-    if (!game) return null;
+    if (!game || paused) return null;
     const step = value === undefined ? game.tap(t) : game.stroke([t], value);
     if (step) afterStep(step);
     else syncAll();
