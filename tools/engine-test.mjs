@@ -777,6 +777,63 @@ for (const [label, board] of crossBoards) {
   eq('纪录比的是先不求人', goodSave.recordBest('easy', { ms: 900, hints: 0, moves: 6, size: '6×6' }), false);
   eq('更少提示破纪录', goodSave.recordBest('easy', { ms: 9000, hints: 0, moves: 1, size: '6×6' }), true);
 
+  // (d2) 两段式解码的四类垃圾样本：整份 null、整份是数组、缺字段、类型错、越界值 —— 每类一条。
+  // 判据不是"不抛错"就完事：坏的那一条记录只许丢它自己，同一份里读得懂的记录必须还在。
+  const reRead = async (payload, tag) => {
+    map = new Map([[KEY, typeof payload === 'string' ? payload : seal(payload)]]);
+    return (await import(`../js/store.js?env=${tag}`)).Store;
+  };
+
+  const nul = await reRead('null', 'g-null');
+  eq('整份是 null 时不抛错且退回默认音效', nul.setting('sound'), true);
+  eq('整份是 null 时没有牌局可继续', nul.resume(), null);
+  eq('整份是 null 时纪录表是空的', Object.keys(nul.best).length, 0);
+
+  const arr = await reRead([1, 2, 3], 'g-arr');
+  eq('整份是数组时退回默认档位', arr.setting('reduceMotion'), false);
+  eq('整份是数组时 totals 补齐成零', `${arr.data.totals.solved}/${arr.data.totals.hints}/${arr.data.totals.ms}`, '0/0/0');
+
+  const thin = await reRead({ settings: {} }, 'g-thin');
+  eq('只有空 settings 时补齐默认', thin.setting('sound'), true);
+  eq('只有空 settings 时没有牌局', thin.resume(), null);
+  eq('只有空 settings 时纪录表可用', thin.best('newbie'), null);
+
+  const wrong = await reRead(
+    { settings: ['not', 'an', 'object'], totals: '零', best: 42, resume: { seed: 'x', tier: 0, cells: 25, ink: [1, 2] } },
+    'g-type'
+  );
+  eq('settings 是数组时退回默认而不是抛错', wrong.setting('sound'), true);
+  eq('totals 是字符串时三项全归零', `${wrong.data.totals.solved}/${wrong.data.totals.hints}`, '0/0');
+  eq('best 是数字时整张纪录表丢掉', Object.keys(wrong.best).length, 0);
+  eq('纪录表坏了不牵连那条读得懂的牌局', wrong.resume().board.length, 25);
+
+  const over = await reRead(
+    {
+      settings: { sound: false },
+      best: { newbie: { ms: 100, hints: 0, moves: 5, size: '5×5' }, easy: null, medium: { ms: '一百', hints: 0, moves: 0 }, hard: { ms: 200, hints: 1, moves: 2, size: '6×6' }, bad: { ms: 1, hints: -1, moves: -1 } },
+      resume: { seed: 'x', tier: 0, cells: 1e6, ink: [1, 2], elapsedMs: -5, moves: '九', hints: 2 },
+    },
+    'g-range'
+  );
+  eq('cells 越界（>4096）时只丢这一条牌局', over.resume(), null);
+  eq('牌局越界不牵连设置', over.setting('sound'), false);
+  eq('一条坏纪录只丢那一条：null 条目被丢', over.best('easy'), null);
+  eq('一条坏纪录只丢那一条：ms 是字符串的被丢', over.best('medium'), null);
+  eq('一条坏纪录只丢那一条：两条好纪录还在', `${over.best('newbie').ms}/${over.best('hard').ms}`, '100/200');
+  eq('负数纪录被丢掉（hints:-1 会永远压过任何真人成绩）', over.best('bad'), null);
+
+  // 越界值在"没被丢掉"的那条路径上也得有界：elapsedMs 负数与 moves 字符串各自归零。
+  map = new Map([[KEY, seal({ resume: { seed: 'x', tier: 99, cells: 4, ink: [1, 1, 2, 2], elapsedMs: -5, moves: '九', hints: -3, at: 'x' } })]]);
+  const clamp = (await import('../js/store.js?env=g-clamp')).Store;
+  const cr = clamp.resume();
+  eq('越界耗时退回 0', cr.elapsedMs, 0);
+  eq('越界步数（字符串）退回 0', cr.moves, 0);
+  eq('越界提示（负数）退回 0', cr.hints, 0);
+  eq('时间戳类型错退回 0', cr.at, 0);
+  eq('档位只夹下不越界也不会崩：tierFor 仍给出真档位', [0, 1, 2, 3, 4].includes(Math.min(cr.tier, 4)), true);
+  // ink 是 (线上值, 段长) 的游程对：[1,1,2,2] 读作"1 个黑、2 个白"，第 4 格没有归属 ⇒ 补成未定。
+  eq('越界样本的逐格解码照样对得上', cr.board.join(','), '1,0,0,2');
+
   // (e) private mode: Safari throws from the *getter*, so every access has to survive that.
   map = new Map(); // an empty backing store: if anything is written, this stops being zero
   Object.defineProperty(globalThis, 'localStorage', {

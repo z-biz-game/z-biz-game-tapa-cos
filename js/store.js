@@ -104,7 +104,8 @@ function sanitize(parsed) {
   out.settings.reduceMotion = !!out.settings.reduceMotion;
   if (isObj(parsed.best)) {
     for (const [tier, r] of Object.entries(parsed.best)) {
-      if (isObj(r) && isNum(r.ms) && isNum(r.hints) && isNum(r.moves) && r.ms >= 0) out.best[tier] = r;
+      if (isObj(r) && isNum(r.ms) && isNum(r.hints) && isNum(r.moves) && r.ms >= 0 && r.hints >= 0 && r.moves >= 0)
+        out.best[tier] = r;
     }
   }
   for (const k of ['solved', 'hints', 'ms']) if (!isNum(out.totals[k]) || out.totals[k] < 0) out.totals[k] = 0;
@@ -116,8 +117,10 @@ function sanitize(parsed) {
       elapsedMs: isNum(r.elapsedMs) && r.elapsedMs >= 0 ? r.elapsedMs : 0,
       cells: r.cells | 0,
       ink: r.ink.filter((v) => Number.isInteger(v)),
-      moves: isNum(r.moves) ? r.moves : 0,
-      hints: isNum(r.hints) ? r.hints : 0,
+      // 负数的步数/提示数会一路活到纪录排名里（`hints < cur.hints` 谁都能压过），
+      // 所以这里和 elapsedMs 同口径：非负才收。
+      moves: isNum(r.moves) && r.moves >= 0 ? r.moves : 0,
+      hints: isNum(r.hints) && r.hints >= 0 ? r.hints : 0,
       at: isNum(r.at) ? r.at : 0,
     };
   }
