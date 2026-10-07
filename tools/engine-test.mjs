@@ -965,6 +965,12 @@ for (const [label, board] of crossBoards) {
         off.push(`${label} 越界（该文件共 ${lines.length} 行）`);
         continue;
       }
+      // A cite that lands on whitespace resolves to nothing at all: it is in range and anchor-free, so
+      // without this clause the two checks above both wave it through as a success.
+      if (lines.slice(r.from - 1, r.to).join('').trim() === '') {
+        off.push(`${label} 那几行整段是空行`);
+        continue;
+      }
       if (r.anchor && !lines.slice(r.from - 1, r.to).join('\n').includes(r.anchor)) {
         anchorBad.push(`${label} 那几行里没有 ${r.anchor}`);
       }
@@ -1056,17 +1062,22 @@ for (const [label, board] of crossBoards) {
     `闸数到 ${unaddressed} · 文档写了 ${gapClaims.length} 处：${[...new Set(gapClaims)].join('/') || '（一处都没写）'}`);
 
 
-  // Anti-idle controls: seven fabricated citations, one per failure mode, must all be caught by name.
+  // Anti-idle controls: eight fabricated citations, one per failure mode, must all be caught by name.
   // Fixture targets are lines of `js/engine/tapa.js` (960 lines; `clueRuns` is declared at :86, and
   // line 1 is a comment that carries neither that name nor `Math.max`) — a stable file this leg never
-  // edits, so the fixtures cannot rot the way a fixture pointing at this file would.
+  // edits, so the fixtures cannot rot the way a fixture pointing at this file would. The eighth one
+  // points at a blank line, and that line is measured here rather than written down: hardcode it and
+  // the day someone fills the gap the knife silently stops testing — `blankAt > 0` reads red instead.
+  const blankLines = linesOf('js/engine/tapa.js') || [];
+  let blankAt = 0;
+  for (let i = 1; i < blankLines.length; i++) if (String(blankLines[i]).trim() === '') { blankAt = i + 1; break; }
   const F = audit('出处 `js/engine/nope.js:1`、`js/engine/tapa.js:99999`、`NO_SUCH_NAME` 在 `js/engine/tapa.js:1`、' +
     '`package.json`（999 行）、`js/engine/tapa.js:1`（`clueRuns`）、`js/engine/tapa.js:1` 的 `clueRuns`、' +
-    '`js/engine/tapa.js:1`（`Math.max(2, 3)`）');
+    '`js/engine/tapa.js:1`（`Math.max(2, 3)`）' + (blankAt ? '、`js/engine/tapa.js:' + blankAt + '`' : ''));
   const fakes = [...F.off, ...F.anchorBad];
-  eq('文档行号对账：七把假引用一把不落（不存在 / 越界 / 行数错 / 后向锚点漂 / 前向括号漂 / 「的」漂 / 调用形式漂）',
-    fakes.length, 7);
-  if (fakes.length !== 7) console.log(fakes.map((x) => `       ${x}`).join('\n'));
+  ok('文档行号对账：八把假引用一把不落（不存在 / 越界 / 行数错 / 后向锚点漂 / 前向括号漂 / 「的」漂 / 调用形式漂 / 无锚点落在空行）',
+    blankAt > 0 && fakes.length === 8, fakes.join(' | ') || '（一把都没红）');
+  if (fakes.length !== 8) console.log(fakes.map((x) => `       ${x}`).join('\n'));
 
   // Positive controls, so a red above cannot just be a broken parser: five real annotation shapes, a
   // spaced command body and a true line count must all read green under the same code path.
