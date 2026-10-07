@@ -810,5 +810,298 @@ for (const [label, board] of crossBoards) {
   install(working);
 }
 
+// ============================ 文档行号对账 ============================
+// README and DESIGN put a `file:line` behind almost every number they print. "That line number refers
+// to code in this repo" is a claim, so a machine has to read it back. Bounds alone are not enough: a
+// citation that lands inside the same file but one line sideways — on the neighbour statement instead
+// of the one being described — passes every bounds check, and this repo has already been burned by it
+// (six DESIGN citations moved onto the wrong assertion when a comment block grew above them). So the
+// name written glued to the citation, inside backticks, must really appear in the lines it points at.
+// Rules are the same ones as ferry / tatamibari / echo-location / creek / lightsout / yajilin / stair-
+// case: five annotation shapes, `::` split before the `/` rejection, `<placeholder>` bodies anchor on
+// their literal prefix, spaced bodies are command lines, a pure-punctuation gap is not an assertion.
+// On top of those, this repo's docs also write continuations (`:247-249` following `js/main.js:166-168`),
+// which the other six legs simply do not see — see BARE below for who may borrow a file and who may not.
+// Kept at the end of this file on purpose: every line above 640 is cited by range in DESIGN, and an
+// import at the top would shift all of them.
+{
+  const fs = await import('node:fs');
+  const pth = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const ROOT = pth.resolve(pth.dirname(fileURLToPath(import.meta.url)), '..');
+  const SKIP = new Set(['.git', 'node_modules', '_scratch', '_site', '_tmp']);
+
+  const PATH_SRC = '[\\w./@-]+?\\.(?:js|mjs|cjs|sh|json|yml|html|css|md)';
+  const CITE = new RegExp('^(' + PATH_SRC + '):([0-9]+(?:[,-][0-9]+)*)$');
+  // This repo also writes its citations as a continuation: `useHint`（`:247-249`）after a full
+  // `js/main.js:166-168`. About half of the spans in these two docs are that shape (the exact two
+  // counts are pinned on the page by the equality gates below, so this comment carries no number to
+  // rot) — a leg that ignored them would report a clean pass on under half of the document.
+  const BARE = /^:([0-9]+(?:[,-][0-9]+)*)$/;
+  const ID = /^[A-Za-z_$][A-Za-z0-9_$]{2,}(?:\.[A-Za-z_$][A-Za-z0-9_$]+)*$/;
+  const tokOf = (body) => {
+    const seg = body.includes('::') ? body.slice(body.lastIndexOf('::') + 2) : body;
+    if (seg.includes('/')) return '';
+    const tpl = /^([^<>]+?)<[^<>\s]+>/.exec(seg);
+    if (tpl && ID.test(tpl[1].split(':')[0].trim())) return tpl[1].split(':')[0].trim();
+    const head = seg.split('(')[0].trim();
+    if (ID.test(head)) return head;
+    const lhs = head.split(/[=:]\s/)[0].trim();
+    return ID.test(lhs) ? lhs : '';
+  };
+
+  let tracked = null;
+  const theTree = () => {
+    if (tracked) return tracked;
+    const out = [];
+    (function dig(dir) {
+      for (const name of fs.readdirSync(pth.join(ROOT, dir))) {
+        if (SKIP.has(name)) continue;
+        const rel = dir ? `${dir}/${name}` : name;
+        if (fs.statSync(pth.join(ROOT, rel)).isDirectory()) dig(rel);
+        else out.push(rel);
+      }
+    })('');
+    tracked = out;
+    return out;
+  };
+  const cache = new Map();
+  const linesOf = (written) => {
+    const clean = written.replace(/^\.\//, '');
+    let rel = fs.existsSync(pth.join(ROOT, clean)) ? clean : null;
+    if (!rel) {
+      const hits = theTree().filter((f) => f === clean || f.endsWith('/' + clean));
+      if (hits.length !== 1) return null;
+      rel = hits[0];
+    }
+    if (!cache.has(rel)) {
+      const arr = fs.readFileSync(pth.join(ROOT, rel), 'utf8').split('\n');
+      if (arr[arr.length - 1] === '') arr.pop();
+      cache.set(rel, arr);
+    }
+    return cache.get(rel);
+  };
+
+  // Where a bare `:NN` gets its file: the nearest preceding **full `path:NN` citation**. A file merely
+  // named in prose is not an owner — DESIGN has 「先跑 `tools/balance.mjs` 的分位表，把实测区间填回代码…
+  // （`:152-158` 的注释就是 `js/engine/generate.js:158` 指回这里的那一行）」, and `:152-158` belongs to
+  // generate.js, not to the file the sentence happened to mention. Letting a prose mention own a
+  // citation would turn those into greens on the wrong file, which is worse than a red.
+  // Same line: any distance. Across a line break: only while the sentence is still open, and never over
+  // a blank line or a heading — the paragraph above belongs to another sentence about another file.
+  // What cannot be addressed is counted and printed on the page, so a new continuation moves the number
+  // instead of quietly covering less.
+  const STOP = /[。！？；]/;
+  const inheritedPath = (text, spans, i) => {
+    for (let j = i - 1; j >= 0; j--) {
+      const pc = spans[j].body.match(CITE);
+      if (!pc) continue;
+      const between = text.slice(spans[j].end, spans[i].s);
+      if (between.includes('\n') && (STOP.test(between) || /\n[ \t]*\n/.test(between) || /\n#{1,6} /.test(between))) {
+        return null;
+      }
+      return { path: pc[1] };
+    }
+    return null;
+  };
+
+  const parseRefs = (text, orphans = null) => {
+    const spans = [];
+    const spanRe = /`([^`\n]+)`/g;
+    let m;
+    while ((m = spanRe.exec(text))) spans.push({ body: m[1], s: m.index, end: m.index + m[0].length });
+    const out = [];
+    for (let i = 0; i < spans.length; i++) {
+      const full = spans[i].body.match(CITE);
+      const bare = full ? null : BARE.exec(spans[i].body);
+      let path = null;
+      let range = null;
+      if (full) {
+        path = full[1];
+        range = full[2];
+      } else if (bare) {
+        const owner = inheritedPath(text, spans, i);
+        if (!owner) {
+          if (orphans) orphans.push(bare[0]);
+          continue;
+        }
+        // A continuation borrows only the path: its own numbers are what the doc claims.
+        path = owner.path;
+        range = bare[1];
+      } else continue;
+      let anchor = '';
+      let consumed = false;
+      const next = spans[i + 1];
+      const gA = next ? text.slice(spans[i].end, next.s) : null;
+      if (gA !== null && gA.length <= 4 && !gA.includes('\n')) {
+        const gN = gA.replace(/\s+/g, '');
+        if (/^[（(]/.test(gN) || gN === '的') { consumed = true; anchor = tokOf(next.body); }
+      }
+      if (!consumed && i > 0) {
+        const prev = spans[i - 1];
+        const gap = text.slice(prev.end, spans[i].s);
+        const gT = gap.replace(/\s+/g, '');
+        const shaped = /^[（(]/.test(gT) || /[\w一-鿿]/.test(gT);
+        if (shaped && !/\s/.test(prev.body) && gap.length <= 4 && !gap.includes('\n')) anchor = tokOf(prev.body);
+      }
+      for (const seg of range.split(',')) {
+        const parts = seg.split('-').map(Number);
+        out.push({ path, from: parts[0], to: parts[parts.length - 1] || parts[0], anchor, cont: !!bare });
+      }
+    }
+    return out;
+  };
+
+  const audit = (text) => {
+    const orphans = [];
+    const refs = parseRefs(text, orphans);
+    const off = [];
+    const anchorBad = [];
+    for (const r of refs) {
+      const label = `${r.path}:${r.from}${r.to !== r.from ? '-' + r.to : ''}`;
+      const lines = linesOf(r.path);
+      if (!lines) { off.push(`${label} 不在盘上或同名不唯一`); continue; }
+      if (r.from < 1 || r.from > r.to || r.to > lines.length) {
+        off.push(`${label} 越界（该文件共 ${lines.length} 行）`);
+        continue;
+      }
+      if (r.anchor && !lines.slice(r.from - 1, r.to).join('\n').includes(r.anchor)) {
+        anchorBad.push(`${label} 那几行里没有 ${r.anchor}`);
+      }
+    }
+    const cntRe = new RegExp('`(' + PATH_SRC + ')`（([0-9]+) 行）', 'g');
+    let k;
+    while ((k = cntRe.exec(text))) {
+      const lines = linesOf(k[1]);
+      if (!lines) off.push(`${k[1]}（${k[2]} 行）不在盘上或同名不唯一`);
+      else if (lines.length !== Number(k[2])) off.push(`${k[1]} 实测 ${lines.length} 行，文档写的是 ${k[2]}`);
+    }
+    return { refs, off, anchorBad, unaddressed: orphans.length };
+  };
+
+  // The audited set is counted out of the directory, never typed: a hand-written list silently shrinks
+  // the sample while the leg keeps printing "everything in range".
+  const docFiles = fs.readdirSync(ROOT).filter((f) => f.endsWith('.md'));
+  ok('文档行号对账：本仓根下有两份以上的文档可审（闸的输入集不许自己空掉）', docFiles.length >= 2, docFiles.join(','));
+
+  let docs = '';
+  const off = [];
+  const anchorBad = [];
+  let refs = 0;
+  let contRefs = 0;
+  let unaddressed = 0;
+  for (const f of docFiles) {
+    const t = fs.readFileSync(pth.join(ROOT, f), 'utf8');
+    docs += t + '\n';
+    const a = audit(t);
+    refs += a.refs.length;
+    contRefs += a.refs.filter((r) => r.cont).length;
+    unaddressed += a.unaddressed;
+    for (const b of a.off) off.push(`${f} · ${b}`);
+    for (const b of a.anchorBad) anchorBad.push(`${f} · ${b}`);
+  }
+  const anchored = parseRefs(docs).filter((r) => r.anchor).length;
+
+  ok('文档行号对账：解析到的引用条数多到它自己算覆盖面（少于 60 条就是输入集缩了）', refs >= 60, `本次解析 ${refs} 条`);
+  eq('文档行号对账：每条 文件:行号 都在盘上、都落在真实行数内', off.length, 0);
+  if (off.length) console.log(off.slice(0, 12).map((x) => `       ${x}`).join('\n'));
+  eq('文档行号对账：贴着引用的那个名字真的出现在被指的那几行里', anchorBad.length, 0);
+  if (anchorBad.length) console.log(anchorBad.slice(0, 12).map((x) => `       ${x}`).join('\n'));
+  ok('文档行号对账：带指认的引用不少于 8 条（少了就是锚点半边在空转）', anchored >= 8, `本次认到锚点 ${anchored} 条`);
+  console.log(`文档门：${docFiles.length} 份文档由目录现数，解析 ${refs} 条 文件:行号（其中续引借到出处 ${contRefs} 条、` +
+    `带指认 ${anchored} 条），另有 ${unaddressed} 处续引在同一句里借不到出处`);
+
+  // Continuations: the same-line rule must resolve them (that is the coverage this repo just bought),
+  // the inherited path must really feed the bounds check, and the walls must hold — a sentence that
+  // ended, a blank line, and a new heading each stop the inheritance. Each is its own assertion
+  // because each can fail in a way the others cannot see.
+  const contG = audit('出处 `js/main.js:166-168`、`useHint`（`:247-249`）');
+  ok('文档行号对账：续引继承同一行前头的出处（两条都解析到 js/main.js 且都判绿）',
+    contG.refs.length === 2 && contG.refs.every((r) => r.path === 'js/main.js') && contG.anchorBad.length === 0,
+    `refs=${contG.refs.map((r) => `${r.path}:${r.from}-${r.to}/${r.anchor}`).join(' ')} 红=${contG.anchorBad.join('|')}`);
+  const contW = audit('上面 `js/main.js:166-168`。\n下面 `undo`（`:263-265`）');
+  ok('文档行号对账：句子已经句号收住，续引不许跨过它去追上一句的文件（跨过去的那条落进「无法定址」）',
+    contW.refs.length === 1 && contW.unaddressed === 1,
+    `refs=${contW.refs.length} 无法定址=${contW.unaddressed}`);
+  const contP = audit('上面 `js/main.js:166-168`、\n下面 `undo`（`:263-265`）');
+  ok('文档行号对账：句子没写完时软换行可以续（散文折行是本仓最常见的写法）',
+    contP.refs.length === 2 && contP.refs[1].path === 'js/main.js' && contP.unaddressed === 0,
+    `refs=${contP.refs.map((r) => r.path + ':' + r.from).join(' ')} 无法定址=${contP.unaddressed}`);
+  const contH = audit('出处 `js/main.js:166-168`\n\n## 新一节\n`undo`（`:263-265`）');
+  ok('文档行号对账：空行与标题之后不再继承上一节的出处（那种写法必须落进「无法定址」）',
+    contH.refs.length === 1 && contH.unaddressed === 1,
+    `refs=${contH.refs.length} 无法定址=${contH.unaddressed}`);
+  const contB = audit('出处 `js/main.js:166-168`、`useHint`（`:99999`）');
+  ok('文档行号对账：借来的出处真的参与越界判定（续引写一个不存在的行号必须红）', contB.off.length === 1,
+    contB.off.join(' | ') || '（没有红——继承只是摆设）');
+  const contF = audit('守它的断言全在 `tools/engine-test.mjs` §1（`:94-127`）');
+  ok('文档行号对账：正文里点名的文件不算出处（只有写成 path:行号 的才继承——否则这句里的 `:94-127` 会被认给一个散文提到的文件）',
+    contF.refs.length === 0 && contF.unaddressed === 1,
+    `refs=${contF.refs.map((r) => r.path + ':' + r.from).join(' ') || '0'} 无法定址=${contF.unaddressed}`);
+  const contC = audit('守它的断言全在 `tools/engine-test.mjs:94-127`（`:94-127` 那条）');
+  ok('文档行号对账：写成完整引用时同一句的续引认得出来（把裸文件名改成 path:行号 就多覆盖一条）',
+    contC.refs.length === 2 && contC.refs[1].path === 'tools/engine-test.mjs' && contC.unaddressed === 0,
+    `refs=${contC.refs.map((r) => r.path + ':' + r.from).join(' ')} 无法定址=${contC.unaddressed}`);
+
+  // Equation pin: the number the docs transcribe must equal what this leg counted — and the docs must
+  // actually print it, otherwise "no claim" would pass as "no error".
+  const claims = [...docs.matchAll(/解析 (\d+) 条/g)].map((x) => Number(x[1]));
+  ok('文档行号对账：文档里每一处「解析 N 条」都等于这条腿自己数到的（删掉数字同样算红）',
+    claims.length >= 1 && claims.every((c) => c === refs), `闸数到 ${refs} · 文档写了 ${claims.length} 处：${[...new Set(claims)].join('/') || '（一处都没写）'}`);
+  // The blind spot gets the same treatment: it is printed on the page, so a new continuation that
+  // cannot be addressed moves the number and this gate reads red instead of quietly covering less.
+  const gapClaims = [...docs.matchAll(/无法定址 (\d+) 处/g)].map((x) => Number(x[1]));
+  ok('文档行号对账：文档里每一处「无法定址 N 处」都等于这条腿数到的（写了才作数）',
+    gapClaims.length >= 1 && gapClaims.every((c) => c === unaddressed),
+    `闸数到 ${unaddressed} · 文档写了 ${gapClaims.length} 处：${[...new Set(gapClaims)].join('/') || '（一处都没写）'}`);
+
+
+  // Anti-idle controls: seven fabricated citations, one per failure mode, must all be caught by name.
+  // Fixture targets are lines of `js/engine/tapa.js` (960 lines; `clueRuns` is declared at :86, and
+  // line 1 is a comment that carries neither that name nor `Math.max`) — a stable file this leg never
+  // edits, so the fixtures cannot rot the way a fixture pointing at this file would.
+  const F = audit('出处 `js/engine/nope.js:1`、`js/engine/tapa.js:99999`、`NO_SUCH_NAME` 在 `js/engine/tapa.js:1`、' +
+    '`package.json`（999 行）、`js/engine/tapa.js:1`（`clueRuns`）、`js/engine/tapa.js:1` 的 `clueRuns`、' +
+    '`js/engine/tapa.js:1`（`Math.max(2, 3)`）');
+  const fakes = [...F.off, ...F.anchorBad];
+  eq('文档行号对账：七把假引用一把不落（不存在 / 越界 / 行数错 / 后向锚点漂 / 前向括号漂 / 「的」漂 / 调用形式漂）',
+    fakes.length, 7);
+  if (fakes.length !== 7) console.log(fakes.map((x) => `       ${x}`).join('\n'));
+
+  // Positive controls, so a red above cannot just be a broken parser: five real annotation shapes, a
+  // spaced command body and a true line count must all read green under the same code path.
+  const pkg = linesOf('package.json');
+  const P = audit('`clueRuns`（`js/engine/tapa.js:86`）、`js/engine/tapa.js:86`（`clueRuns`）、`js/engine/tapa.js:86` 的 `clueRuns`、' +
+    '`js/engine/tapa.js:86`（`decodeClue(code)`）、`js/engine/tapa.js:86`（`js/engine/tapa.js::clueRuns`）、' +
+    '`js/engine/tapa.js:86`（`npm test`） 与 `package.json`（' + (pkg ? pkg.length : 0) + ' 行）');
+  eq('文档行号对账：五种真注解 + 带空格的命令行 body + 真行数在同一解析器下判绿', [...P.off, ...P.anchorBad].length, 0);
+  eq('文档行号对账：正样本真的解析到了 6 条引用（第 7 处是「N 行」等值断言，不是引用）', P.refs.length, 6);
+
+  const tplG = audit('`js/engine/tapa.js:86`（`clueRuns:<占位>`）');
+  const tplR = audit('`js/engine/tapa.js:86`（`NOPE:<占位>`）');
+  ok('文档行号对账：模板 body 取字面量前缀（前缀对得上判绿、对不上必须红）',
+    tplG.anchorBad.length === 0 && tplG.refs.length === 1 && tplR.anchorBad.length === 1,
+    `绿=${tplG.anchorBad.length ? tplG.anchorBad.join(' | ') : 'ok'} · 红在 ${tplR.anchorBad.join(' | ') || '（一处都没红）'}`);
+
+  const comma = audit('`NO_SUCH_NAME`，`js/engine/tapa.js:86`');
+  ok('文档行号对账：纯标点间隔（`，`）不构成指认，这种写法必须判绿',
+    comma.anchorBad.length === 0 && comma.refs.length === 1,
+    `${comma.anchorBad.join(' | ') || '绿'}（refs=${comma.refs.length}）`);
+
+  // The leg must bite on this repo's own docs: pick the first annotated citation that can be shifted
+  // one line and still stay inside its file, mutate it in memory only — the files on disk are untouched.
+  let needle = null;
+  for (const r of parseRefs(docs).filter((x) => x.anchor)) {
+    const lines = linesOf(r.path) || [];
+    const to = r.to + 1;
+    if (to > lines.length) continue;
+    const label = `${r.path}:${r.from}${r.to !== r.from ? '-' + r.to : ''}`;
+    const poisoned = audit(docs.split('`' + label + '`').join('`' + `${r.path}:${r.from + 1}-${to}` + '`'));
+    if (poisoned.anchorBad.length >= 1) { needle = { label, anchor: r.anchor, bad: poisoned.anchorBad }; break; }
+  }
+  ok('文档行号对账：把文档里一条界内的真引用挪歪一格，这条腿必须为它变红', !!needle,
+    needle ? `${needle.label} → 挪一格后红在 ${needle.bad[0]}` : `带指认的 ${anchored} 条里没有一条挪歪会红——锚点是摆设`);
+}
+
 console.log(`\n${pass} 条断言通过 / ${fail} 条失败`);
 process.exit(fail ? 1 : 0);
