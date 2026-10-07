@@ -952,6 +952,17 @@ for (const [label, board] of crossBoards) {
     return out;
   };
 
+  // Whole word, not substring. `clue` "appears in" the line that declares `clueRuns`, and a one-letter
+  // name matches inside any identifier that happens to contain it — a substring matcher is therefore
+  // *weaker* than the hand-typed list it replaces, and it turns a real drift into a green.
+  const wordCache = new Map();
+  const hasWord = (text, name) => {
+    if (!wordCache.has(name)) {
+      wordCache.set(name, new RegExp('(^|[^A-Za-z0-9_$])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^A-Za-z0-9_$])'));
+    }
+    return wordCache.get(name).test(text);
+  };
+
   const audit = (text) => {
     const orphans = [];
     const refs = parseRefs(text, orphans);
@@ -971,7 +982,7 @@ for (const [label, board] of crossBoards) {
         off.push(`${label} 那几行整段是空行`);
         continue;
       }
-      if (r.anchor && !lines.slice(r.from - 1, r.to).join('\n').includes(r.anchor)) {
+      if (r.anchor && !hasWord(lines.slice(r.from - 1, r.to).join('\n'), r.anchor)) {
         anchorBad.push(`${label} 那几行里没有 ${r.anchor}`);
       }
     }
@@ -1062,22 +1073,26 @@ for (const [label, board] of crossBoards) {
     `闸数到 ${unaddressed} · 文档写了 ${gapClaims.length} 处：${[...new Set(gapClaims)].join('/') || '（一处都没写）'}`);
 
 
-  // Anti-idle controls: eight fabricated citations, one per failure mode, must all be caught by name.
+  // Anti-idle controls: nine fabricated citations, one per failure mode, must all be caught by name.
   // Fixture targets are lines of `js/engine/tapa.js` (960 lines; `clueRuns` is declared at :86, and
   // line 1 is a comment that carries neither that name nor `Math.max`) — a stable file this leg never
   // edits, so the fixtures cannot rot the way a fixture pointing at this file would. The eighth one
   // points at a blank line, and that line is measured here rather than written down: hardcode it and
   // the day someone fills the gap the knife silently stops testing — `blankAt > 0` reads red instead.
+  // The ninth names `clue` on the line that declares `clueRuns`: an identifier can only ever contain
+  // that prefix, so a substring matcher reads it green and this is the knife that dies first if the
+  // anchor check ever slides back to `.includes`.
   const blankLines = linesOf('js/engine/tapa.js') || [];
   let blankAt = 0;
   for (let i = 1; i < blankLines.length; i++) if (String(blankLines[i]).trim() === '') { blankAt = i + 1; break; }
   const F = audit('出处 `js/engine/nope.js:1`、`js/engine/tapa.js:99999`、`NO_SUCH_NAME` 在 `js/engine/tapa.js:1`、' +
     '`package.json`（999 行）、`js/engine/tapa.js:1`（`clueRuns`）、`js/engine/tapa.js:1` 的 `clueRuns`、' +
-    '`js/engine/tapa.js:1`（`Math.max(2, 3)`）' + (blankAt ? '、`js/engine/tapa.js:' + blankAt + '`' : ''));
+    '`js/engine/tapa.js:1`（`Math.max(2, 3)`）' + (blankAt ? '、`js/engine/tapa.js:' + blankAt + '`' : '') +
+    '、`js/engine/tapa.js:86`（`clue`）');
   const fakes = [...F.off, ...F.anchorBad];
-  ok('文档行号对账：八把假引用一把不落（不存在 / 越界 / 行数错 / 后向锚点漂 / 前向括号漂 / 「的」漂 / 调用形式漂 / 无锚点落在空行）',
-    blankAt > 0 && fakes.length === 8, fakes.join(' | ') || '（一把都没红）');
-  if (fakes.length !== 8) console.log(fakes.map((x) => `       ${x}`).join('\n'));
+  ok('文档行号对账：九把假引用一把不落（不存在 / 越界 / 行数错 / 后向锚点漂 / 前向括号漂 / 「的」漂 / 调用形式漂 / 无锚点落在空行 / 前缀不算整词）',
+    blankAt > 0 && fakes.length === 9, fakes.join(' | ') || '（一把都没红）');
+  if (fakes.length !== 9) console.log(fakes.map((x) => `       ${x}`).join('\n'));
 
   // Positive controls, so a red above cannot just be a broken parser: five real annotation shapes, a
   // spaced command body and a true line count must all read green under the same code path.
