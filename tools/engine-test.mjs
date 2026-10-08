@@ -831,7 +831,7 @@ for (const [label, board] of crossBoards) {
   const ROOT = pth.resolve(pth.dirname(fileURLToPath(import.meta.url)), '..');
   const SKIP = new Set(['.git', 'node_modules', '_scratch', '_site', '_tmp']);
 
-  const PATH_SRC = '[\\w./@-]+?\\.(?:js|mjs|cjs|sh|json|yml|html|css|md)';
+  const PATH_SRC = '[\\w./@-]+?\\.[A-Za-z][A-Za-z0-9]{0,11}'; // 后缀不许写死：写死成某一族的语言时，本腿在那种仓里是哑的，而「0 条引用」读起来和「全核过」一模一样
   const CITE = new RegExp('^(' + PATH_SRC + '):([0-9]+(?:[,-][0-9]+)*)$');
   // This repo also writes its citations as a continuation: `useHint`（`:247-249`）after a full
   // `js/main.js:166-168`. About half of the spans in these two docs are that shape (the exact two
