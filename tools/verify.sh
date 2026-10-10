@@ -95,7 +95,7 @@ echo "boot: tapa $BOOT at $BASE"
 [ "$BOOT" = "nope" ] && { echo "window.tapa never appeared at $BASE" >&2; exit 4; }
 
 FAILED=0
-for s in ${SCENARIOS:-engine gen library play ink hint conflict zero save resume layout}; do
+for s in ${SCENARIOS:-engine gen library play ink hint conflict zero save resume pause layout}; do
   echo "=== $s ==="
   node tools/playtest.cjs scenario "$s" 2>/tmp/tapa-$s.console.log | tail -1 | sed 's/^RESULT //' | python3 -c "
 import sys, json
@@ -135,5 +135,10 @@ if [ -n "${SHOTS:-}" ]; then
 fi
 
 kill $WD 2>/dev/null
+# 部署集闸：ci.yml 跑这两步、本地整闸以前一次都不跑。缺这一步就是「本地全绿、线上 404 自己的
+# manifest / sw.js / 图标」这一整类坏法。它不碰 Chrome，也不读页面，纯查产物。
+echo "=== deploy-set ==="
+node tools/deploy-set.mjs || FAILED=1
+node tools/deploy-set-selftest.mjs || FAILED=1
 [ $FAILED -eq 0 ] && echo "=== ALL GREEN ===" || echo "=== FAILURES ABOVE ==="
 exit $FAILED

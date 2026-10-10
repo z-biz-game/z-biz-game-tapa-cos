@@ -8,8 +8,17 @@ import { BLACK, WHITE, UNKNOWN } from '../engine/tapa.js';
 let ctx = null;
 let master = null;
 let enabled = true;
+// 静音偏好：读回存档。放在模块顶层，这样每次 init（首屏、开局、重开）都拿到同一个答案，
+// 重开一局不会把玩家的静音选择洗掉。
+try {
+  if (localStorage.getItem('cos.mute') === '1') enabled = false;
+} catch { /* 读不到就沿用默认开声 */ }
+
 
 function audio() {
+  // 静音态第一行就返回：既不把已挂起的 ctx 拉起来，也不新建节点。
+  // 这条比 "gain 设 0" 强一档——静音时这个 AudioContext 根本没有在跑。
+  if (!enabled) return null;
   const Ctor = typeof AudioContext !== 'undefined' ? AudioContext : typeof webkitAudioContext !== 'undefined' ? webkitAudioContext : null;
   if (!Ctor) return null;
   if (!ctx) {
@@ -56,10 +65,21 @@ export const Sound = {
   // 开关的两面都得真动手：翻成静音时把已存在的上下文挂起，翻回来时唤醒它。
   // ctx 还没被创建过时什么都不做 —— 静音不该反手替玩家造出一个音频上下文。
   setEnabled(v) {
-    enabled = !!v;
-    if (!ctx) return;
-    if (!enabled && ctx.state === 'running') ctx.suspend().catch(() => {});
-    else if (enabled && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const on = !!v;
+    if (on === enabled) return;
+    enabled = on;
+    // 真静音：停掉 AudioContext 本身（时钟停、图不跑），不是把音量拧到 0。
+    if (ctx) {
+      if (on) {
+        if (ctx.state === 'suspended' && ctx.resume) ctx.resume().catch(() => {});
+      } else if (ctx.state === 'running' && ctx.suspend) {
+        ctx.suspend().catch(() => {});
+      }
+    }
+    // 偏好落盘：刷新页面后 init 要能读回静音态，不能自己弹回来。
+    try {
+      localStorage.setItem('cos.mute', on ? '1' : '0');
+    } catch { /* 隐私模式下写不进去也不该炸游戏 */ }
   },
   enabled: () => enabled,
   // 同一个开关从另一面读：HUD 与验证台都按这个名字问它，避免各自再猜一次布尔的方向。

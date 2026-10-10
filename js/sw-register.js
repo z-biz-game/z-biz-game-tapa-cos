@@ -1,14 +1,12 @@
 'use strict';
-// 注册本身要静默失败：file:// 下、旧 Safari、无痕窗口都拿不到 serviceWorker，
-// 那不是玩家的错，不该在控制台抛红。
+// service worker 注册：只在 http/https 下做。
 //
-// sw.js 与 scope 都按 document.baseURI 解析，而不是拿 'sw.js' 让浏览器按当前 URL
-// 字符串猜：Pages 上少一个尾斜杠时相对路径会一路找到 domain root 的 sw.js，那是别的
-// 游戏的 worker —— 注册成功比失败更难查。
-if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
-  window.addEventListener('load', function () {
-    var swUrl = new URL('sw.js', document.baseURI).href;
-    var scope = new URL('./', document.baseURI).href;
-    navigator.serviceWorker.register(swUrl, { scope: scope }).catch(function () {});
+// file:// 直接打开（双击 index.html、或把仓库 zip 解开看）时 navigator.serviceWorker
+// 要么不存在、要么 register 必抛 SecurityError。那不是玩家的错，不该在控制台上留一条
+// 红字，更不该让后面真正该跑的 main.js 因为这条未捕获异常被中断。
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  window.addEventListener('load', () => {
+    // 相对 sw.js 而不是绝对 /sw.js：Pages 的项目站挂在 /<repo>/ 子路径下。
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
   });
 }
