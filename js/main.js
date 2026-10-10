@@ -985,21 +985,12 @@ window.tapa = surface;
 //
 // 用 var 而不是 let：本块在文件末尾，而 startClock() 可能在它之前就被 begin() 调过；
 // let 声明提升不到初始化，TDZ 会直接抛 ReferenceError。
-var paused = false;
 function paintPauseButton() {
   var b = document.getElementById('btn-pause');
   if (!b) return;
   b.setAttribute('aria-pressed', String(paused));
   b.textContent = paused ? '继续' : '暂停';
   b.title = paused ? '继续 (P)' : '暂停 (P)';
-}
-function setPaused(v) {
-  v = !!v;
-  if (v === paused) return paused;
-  if (v) stopClock(); else startClock();
-  paused = v;
-  paintPauseButton();
-  return paused;
 }
 function togglePause() { return setPaused(!paused); }
 function isPaused() { return paused; }
