@@ -8,8 +8,8 @@
 // same shape:
 //   * the neighbour list is rebuilt here from the prose (its own clockwise table, its own bounds
 //     test) instead of the solver's precomputed ring table;
-//   * a ring's runs are read as a plain boolean list, and rotation equivalence uses string
-//     containment instead of the solver's index loop;
+//   * a ring's runs are read as a plain boolean list, and the two run lists are compared
+//     element-by-element in ring order — never up to rotation (see `sameRuns` below);
 //   * the search is a row-major exhaustive backtrace with no inference rules at all — it never
 //     "deduces" a cell, it tries both colours and keeps whatever survives.
 //
