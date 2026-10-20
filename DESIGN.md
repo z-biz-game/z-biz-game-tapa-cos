@@ -138,7 +138,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 **第二意见。** `js/engine/count.js` 里没有任何 `import` 语句（本轮 `grep -c '^import' js/engine/count.js` = 0，
 出现"import"这个词的三行全是注释），
 它按同一份规则散文**重搭**几何：自己的方位表 `OFFSETS`（`js/engine/count.js:44`，注释交代了"两边不一致就全红"）、
-自己的 `neighboursOf`（`js/engine/count.js:49-60`）、自己的 `runsOf`（`js/engine/count.js:71-86`）、旋转等价用字符串包含而不是下标循环
+自己的 `neighboursOf`（`js/engine/count.js:49-60`）、自己的 `runsOf`（`js/engine/count.js:71-86`）、环上的段读成布尔表之后**按环序逐位精确比**，不按旋转等价读
 （`js/engine/count.js:11-14` 注释、`:93-97`）。搜索是行主序两色试探（`js/engine/count.js:300-325`），**一条推理规则都不读**：
 它只允许四条"局部可判定"的剪枝，而且每条都只**拒分支**、不写格（`js/engine/count.js:20-35` 逐条列出）。
 `forced`（每格是否所有解同色）**只在走穷时才算**（`js/engine/count.js:333-341`）；没走穷就把 `forced` 读成结论是最贵的假。
