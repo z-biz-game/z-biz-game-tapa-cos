@@ -166,8 +166,8 @@ npm run electron     # 桌面壳（electron/main.cjs，同一份代码，无构�
   与**已部署的 Pages 产物**上跑过（后者 2026-09-28 对**当时那份**产物实测：
   `BASE_URL=https://z-biz-game.github.io/z-biz-game-tapa-cos/ npm run verify` → 11 个场景
   476 条断言 0 失败，exit 0；本地根路径那一次同样 476/0——那份产物还没有 `pause` 场景）；
-  读屏与键盘无障碍（画布只有一个 `aria-label`，`index.html:82`；`#state-line` 有 `aria-live`，
-  `index.html:95`，仅此而已）；低端机上的出题与穷举耗时；`count.js` 的 `code:'invalid'` 分支
+  读屏与键盘无障碍（画布只有一个 `aria-label`，`index.html:81`；`#state-line` 有 `aria-live`，
+  `index.html:94`，仅此而已）；低端机上的出题与穷举耗时；`count.js` 的 `code:'invalid'` 分支
   （`count.js:127`——`createBoard` 已先把环长不够的盘拒了，测试里没有任何一例走到那条）。
 - **不承诺文档全量对账**（下面那条文档腿只认它看得见的指认）。它只读**反引号里**的 `文件:行号`：写在正文里
   不带反引号的不算，`aria-label` 这种带连字符的名字不构成锚点。本仓还有"续引"这一种写法（完整引用后面
