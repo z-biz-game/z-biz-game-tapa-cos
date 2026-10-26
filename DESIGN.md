@@ -106,7 +106,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 
 ## 4. 两套互不信任的实现，以及"只收缩"的轮次纪律
 
-铅笔路径五趟规则（`Rules`，`js/engine/tapa.js:313-319`）：
+铅笔路径五趟规则（`js/engine/tapa.js:313-319` 的 `Rules`）：
 
 | 键 | 名字 | 层级 | 权重 | 依据的账 |
 |---|---|---|---|---|
@@ -129,8 +129,10 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 > **铅笔推得完 ⟹ 解唯一。** 反方向**不**宣称，也不测（`tools/engine-test.mjs:536-539` 写明了这一点）。
 
 **轮次纪律。** `live`（每条线索还活得下来的摆法表）由 `makeCtx` 从 `board.patterns[i]` **复制**而来
-（`js/engine/tapa.js:707-714`），被穿过整条推导（`solve`→`sweep`→`ringStep`，`js/engine/tapa.js:681`、`:732-741`），
-`ringStep` 只把它改短（`live.length = 0` 后填回 `survivors`，`js/engine/tapa.js:397-398`）。
+（`js/engine/tapa.js:707-714`），被穿过整条推导（`js/engine/tapa.js:727` 的 `solve` 起手就调
+`js/engine/tapa.js:729` 的 `sweep`，反证循环 `js/engine/tapa.js:732-741` 里再调一次；`sweep` 每轮在
+`js/engine/tapa.js:681` 叫 `ringStep`），
+`ringStep` 只把它改短（`live.length = 0` 后填回 `js/engine/tapa.js:397-398` 的 `survivors`）。
 所以第 1 轮被否证的摆法不会在第 4 轮回来"帮忙"——这条是上面那个论证成立的前提（`js/engine/tapa.js:369-372`）。
 反证的试探同理：它拿 `copyLive` 复制一份 `live` 再扫（`js/engine/tapa.js:640`、`:701-705`），
 探针的结论不改变主推导的候选集，只有被写下的那一格改变它。
@@ -187,7 +189,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 浏览器 **入门/简单/…/大师 数字确实被删过**（`tools/scenarios.js:373`，比较线索数与格数）与
 `balance` 的 **每档都还带着 0 0 0**（本轮 `五局里 5 局含 0 0 0` × 5 档）。
 
-**五个旋钮**（`TIERS`，`js/engine/generate.js:159-165`）：盘尺寸、黑格密度 `fill`、是否允许反证 `useNishio`、
+**五个旋钮**（`js/engine/generate.js:159-165` 的 `TIERS`）：盘尺寸、黑格密度 `fill`、是否允许反证 `useNishio`、
 选取目标 `band`、必带 `0 0 0`。**band 不是愿望**：先跑 `tools/balance.mjs` 的分位表，
 把实测区间填回代码，再拿它当门禁（`js/engine/generate.js:152-158` 的注释就是 `js/engine/generate.js:158` 指回这里的那一行）。
 本轮 `SAMPLES=24 npm run balance` 实测（exit 0）：
