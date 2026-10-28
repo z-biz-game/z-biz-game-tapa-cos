@@ -117,7 +117,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 | `nishio` | 反证排除 | 3 | 3 | 假设此格某色 ⇒ 廉价扫撞矛盾 ⇒ 取反——`js/engine/tapa.js:627-661` |
 
 分数 `= Σ(权重 + ELIM_WEIGHT × 排除份额)`，`ELIM_WEIGHT = 1.5`（`js/engine/tapa.js:310-312`、`:321-324`、`:750`）。
-排除份额只有环上相容会有值：`elim = 1 - 幸存数/原始数`（`js/engine/tapa.js:401`、`:424`）——
+排除份额只有环上相容会有值：`elim = 1 - 幸存数/原始数`（`js/engine/tapa.js:401-424`）——
 这是"同样 25 步里这一格要想很久"的那个东西（`tools/balance.mjs` 单独打印 elim 列，见 §5）。
 
 **为什么这五趟写下的每一格都对盘面的每一个解成立。** `ringStep` 只在这条线索"与已知相容的摆法集合"
@@ -277,7 +277,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 原因是 `verify()` 报的三类可见故障（线索自色 `js/engine/tapa.js:805-807`、环上黑多 `:816-818`、2×2 全黑 `:830-833`、
 白格分成几块 `js/engine/tapa.js:841-854`）与 `sweep` 里那四趟读的是同一批规则：故障一出现，廉价扫基本同时撞矛盾。
 **这是实测，不是证明**，所以文档只允许写"到不了"这一层，不允许写"不可能到"。
-结论落到 README 上就是：**状态行不告诉你对不上的有几处**，处数只走 `#stat-conflicts`（`js/main.js:123`）。
+结论落到 README 上就是：**状态行不告诉你对不上的有几处**，处数只走 `#stat-conflicts`（`js/main.js:180-182`）。
 
 顺带一句口径纠正：`#stat-conflicts` 显示的是 `state().problems`（= `verify()` 的故障**条数**），
 而 `state().conflicts` 是**另一个字段**（= `diagnose().violated.size`，被点名的**线索格数**，
@@ -375,7 +375,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 **② 冻盘。** 闸装在**写手**身上，不装在输入设备上：`setMode`（`js/main.js:217-225`）、`useHint`（`:362-376`）、
 `undo`（`:378-388`）、`strokeStart`（`:594-601`）、`strokeEnd`（`:607-609`），加上台面直接改盘的三条
 `stroke`（`:814-820`）、`tap`（`:821-828`）、`solveWithLogic`（`:829-838`）——八条路各自先退回再动手。
-挡下来的一刀由 `blockedWhilePaused` 写进 `#state-line`（`js/main.js:950-956`，先 `syncAll()` 再写，
+挡下来的一刀由 `blockedWhilePaused` 写进 `#state-line`（`js/main.js:933-956`，先 `syncAll()` 再写，
 因为 `syncStats()` 会盖掉那一格），**不是把控件弄灰**：弄灰的按钮按下去得不到任何解释。
 
 **为什么不在 keydown listener 上整体挡掉。** H/Z/B/W/E 那一路（`js/main.js:752-756`）走的就是
@@ -410,7 +410,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 
 **③ 两条互不知情的解冻路，只有一条会重画按钮** —— 表现为一把看着解不开的死锁：盘面已经能画了，
 按钮还写着「继续」，按下去变成"再暂停一次"。修法是 `startClock()` **不碰** `paused`（`js/main.js:202-209`，
-理由就写在函数头上），解冻只剩 `setPaused(false)`（`js/main.js:239-264`）与 `adoptFreshBoard()` 两处，
+理由就写在函数头上），解冻只剩 `setPaused`（`js/main.js:239-264`）与 `adoptFreshBoard()` 两处，
 两处都画按钮。钉法同样是源码形状（`startClock() 不顺手解冻（解冻只有两处）`）+ 两条行为腿
 （`换一局把按钮画对`、`换一局松开按下态`）。
 
