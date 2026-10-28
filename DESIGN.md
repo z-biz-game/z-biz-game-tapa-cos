@@ -1,8 +1,8 @@
 # 设计说明 · 视窗 Tapa
 
 这份文件讲"为什么这样写"。要跑起来请看 `README.md`；要看断言请看 `tools/engine-test.mjs`
-（**359 条**，§1–§8 九个小节 + 末尾那段文档行号对账——含 §7b，其中 §7 与 §7b 专门是两套实现的交叉对账）与 `tools/scenarios.js`
-（**12 个场景 / 610 条浏览器断言**）——本轮实测：`npm test` 打出 `359 条断言通过 / 0 条失败`，
+（**383 条**，§1–§8 九个小节 + 末尾那段文档行号对账——含 §7b，其中 §7 与 §7b 专门是两套实现的交叉对账）与 `tools/scenarios.js`
+（**12 个场景 / 610 条浏览器断言**）——本轮实测：`npm test` 打出 `383 条断言通过 / 0 条失败`，
 `npm run verify` 打出 `=== ALL GREEN ===`（逐场景 67/53/27/69/51/28/34/28/39/34/134/46，全为 0 failed）。
 **这个项目里的每一句承诺，都对应一条会红的断言或一个实测数字**；接不住证据的句子在这份文件里就没写。
 
@@ -59,7 +59,7 @@
 `0 0 0` 的语义由两条规则分工实现：`selfPass` 对零线索写的是**白**（`kind:'self-white'`，`js/engine/tapa.js:341-367`），
 `ringPatterns(0, slots)` 只返回全白那一种摆法（`js/engine/tapa.js:193-195`，断言 **0 0 0 只有全白一种** /
 **0 0 0 在角上也是全白一种**）。画面上它也不是"没数字"：青色虚线环
-（`js/theme.js:42` `zeroClue:'#6FD3C5'`、`css/game.css:366-370` 的 `border-radius:50%` 环），
+（`js/theme.js:42` `zeroClue:'#6FD3C5'`、`css/game.css:382-386` 的 `border-radius: 50%` 环），
 浏览器 `zero` 场景按**画布像素**分三类采样，本轮实测 `hoopZero 12 · hoopClue 0 · hoopNone 0`。
 
 顺带一条**没被任何断言跑过**的分支，写在这里是为了不让人误读：`js/engine/count.js:127` 的
@@ -345,40 +345,40 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 隐私模式那一路在 `tools/engine-test.mjs` §8 用假 `localStorage`（属性访问就抛）打，
 断言 **隐私模式下清空存档同样不抛错**、**抛错的那个 localStorage 一次也没被写穿过**。
 
-**44 是 DOM 按钮的承诺，不是画布格子的承诺。** `css/game.css:61-71` 给 `button` 上
-`min-height: var(--touch-min)`（那句在 `:65`，注释在 `:59-60`），`js/theme.js:57` `Touch = { min: 44 }`；
-手机轮又补了一条硬下限 `css/game.css:443-455`（`44px !important`，选择器是
+**44 是 DOM 按钮的承诺，不是画布格子的承诺。** `css/game.css:65-80` 给 `button` 上
+`min-height: var(--touch-min)`（那句在 `:74`，注释在 `:65-66`），`js/theme.js:57` `Touch = { min: 44 }`；
+手机轮又补了一条硬下限 `css/game.css:459-471`（`44px !important`，选择器是
 `button:not(.link)` / `select` / `input` / `textarea` / `a[href]` / `[role="button"]`）——
 带 !important 的那条盖过一切组件规则，所以豁免只能写在它自己的选择器里，
-`button.link` 之所以还真的是豁免，靠的是这个 `:not(.link)`，不是 `css/game.css:93-100` 那句 `min-height: 0`。
-全屏唯一一处豁免是 `button.link`（`css/game.css:93-100`，`min-height: 0` + 12px），
-而且**按 id 钉死**：**全屏只有清空存档豁免 44** = `btn-reset`（`tools/scenarios.js:1499`），
-另有 `:1495` 那条反空转盯着"豁免确实小过 44"（把 `:not(.link)` 改回 `button` 时红的是它）。
-棋局屏的十一条名册与选档屏的十条名册各自有一条 `eq` 盯着（`tools/scenarios.js:1493`、`:1507`，两屏都含 `btn-pause`），
-测量方法是逐个 `getBoundingClientRect()`、两轴都算、只量有 client rect 的控件（`tools/scenarios.js:1473-1492`）。
-画布上的格走另一套下限：`js/theme.js:79` `Cell = { min: 26, max: 64, … }`，
+`button.link` 之所以还真的是豁免，靠的是这个 `:not(.link)`，不是 `css/game.css:102-112` 那句 `min-height: 0`。
+全屏唯一一处豁免是 `button.link`（`css/game.css:102-112`，`min-height: 0` + 12px），
+而且**按 id 钉死**：**全屏只有清空存档豁免 44** = `btn-reset`（`tools/scenarios.js:1504`），
+另有 `:1500` 那条反空转盯着"豁免确实小过 44"（把 `:not(.link)` 改回 `button` 时红的是它）。
+棋局屏的十一条名册与选档屏的十条名册各自有一条 `eq` 盯着（`tools/scenarios.js:1498`、`:1512`，两屏都含 `btn-pause`），
+测量方法是逐个 `getBoundingClientRect()`、两轴都算、只量有 client rect 的控件（`tools/scenarios.js:1478-1490`）。
+画布上的格走另一套下限：`js/theme.js:80` `Cell = { min: 26, max: 64, … }`，
 `play`/`layout` 场景在 900×900 视口下读到的 cell 是 44 px、`ink` 场景读到 64——**这些是读数不是承诺**。
 
 ## 8a. 暂停：冻住的是两样东西，缺一件榜上就是假数
 
-`#stat-time` 那一格和落进存档的 `ms` 读的是同一个 `clock()`（`js/main.js:58`；续局走
-`flushResume` `js/main.js:140-143`，赢局走 `onWin` `:214`），同档排序是**提示次数 → 步数 → `ms`**
+`#stat-time` 那一格和落进存档的 `ms` 读的是同一个 `clock()`（`js/main.js:68`；续局走
+`flushResume` `js/main.js:197-201`，赢局走 `onWin` `:310`），同档排序是**提示次数 → 步数 → `ms`**
 （`js/store.js:157-164`）。前两级挡不住暂停这件事：一局零提示、步数也和对面的纪录一样，
 把暂停期间想出来的手一路画完，`ms` 就是白捡的——榜上那个数不再是玩家花掉的时间。
 所以这一腿必须同时做两件事，而且**两件事各有各的钉法**。
 
 **① 停表。** `setPaused(true)` → `stopClock()`：`baseElapsed = clock()` 落账、`startedAt = 0`、ticker 停
-（`js/main.js:158-163`），此后 `clock()` 恒等于 `baseElapsed`，墙钟再走多久都加不上去。
+（`js/main.js:211-214`），此后 `clock()` 恒等于 `baseElapsed`，墙钟再走多久都加不上去。
 `setPaused(false)` → `startClock()` 把 `startedAt` 复位成"从现在起"，所以恢复后的第一帧不会把暂停
 期间憋下的墙钟一次性灌进来（实测：`解冻后的第一帧不补灌冻结期间的墙钟`）。
 
-**② 冻盘。** 闸装在**写手**身上，不装在输入设备上：`setMode`（`js/main.js:166-168`）、`useHint`（`:247-249`）、
-`undo`（`:263-265`）、`strokeStart`（`:404-410`）、`strokeEnd`（`:432-438`），加上台面直接改盘的三条
-`stroke`（`:543-545`）、`tap`（`:550-552`）、`solveWithLogic`（`:558-562`）——八条路各自先退回再动手。
-挡下来的一刀由 `blockedWhilePaused` 写进 `#state-line`（`js/main.js:738-745`，先 `syncAll()` 再写，
+**② 冻盘。** 闸装在**写手**身上，不装在输入设备上：`setMode`（`js/main.js:217-225`）、`useHint`（`:362-376`）、
+`undo`（`:378-388`）、`strokeStart`（`:594-601`）、`strokeEnd`（`:607-609`），加上台面直接改盘的三条
+`stroke`（`:814-820`）、`tap`（`:821-828`）、`solveWithLogic`（`:829-838`）——八条路各自先退回再动手。
+挡下来的一刀由 `blockedWhilePaused` 写进 `#state-line`（`js/main.js:950-956`，先 `syncAll()` 再写，
 因为 `syncStats()` 会盖掉那一格），**不是把控件弄灰**：弄灰的按钮按下去得不到任何解释。
 
-**为什么不在 keydown listener 上整体挡掉。** H/Z/B/W/E 那一路（`js/main.js:509-518`）走的就是
+**为什么不在 keydown listener 上整体挡掉。** H/Z/B/W/E 那一路（`js/main.js:752-756`）走的就是
 `useHint`/`undo`/`setMode` 这几个函数，闸装在写手身上它自动**继承**，并且和按钮一样拿到一句点名；
 如果在 listener 上 `return`，玩家按下 H 什么反馈都拿不到。代价照实写：**新增一个写手就得记得挂闸**。
 所以 `pause` 场景反过来钉：17 条名册逐条要求 `blocked().last` 等于自己的名字，外加一条
@@ -386,10 +386,10 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 名册里既有真实事件（左点、右擦、拖、五个键、三个按钮）也有台面调用，因为台面那三条是
 "玩家点不到、却能改盘"的路。两处口径讲究：`strokeStart` 的闸装在 `hitCell` 与 `preventDefault`
 **之后**，所以按在棋盘外那一按**不记账**（`棋盘外那一按不记账`）——不然那个计数就不是
-"玩家想改盘被挡了几次"；键盘 `1`–`5` **不带闸**（`js/main.js:517` 的条件是 `!el.viewMenu.hidden`），它起的是新局。
+"玩家想改盘被挡了几次"；键盘 `1`–`5` **不带闸**（`js/main.js:766` 的条件是 `!el.viewMenu.hidden`），它起的是新局。
 
 **拖到一半按暂停**（一只手压着鼠标、另一只手按 P 是真做得到的）：`strokeEnd` 在 `paused` 时把
-**整笔作废**（`js/main.js:436-441`）——先 `unpreview(s)` 把预览擦回去，再记账，再 `return null`。
+**整笔作废**（`js/main.js:562-566`）——先 `unpreview(s)` 把预览擦回去，再记账，再 `return null`。
 不这么做，冻住的盘面会从"这一笔开始于解冻的时候"那条缝里把它收下。
 
 ### 三个形状，三种钉法
@@ -397,9 +397,9 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 **① 盘面在暂停里可写** —— 上面那八把闸，行为腿钉得住。
 
 **② 换一局时把冻结带进新盘，或者反过来给一块没接手的新盘解冻。**
-`begin()` 的第一条出口是 `if (!puzzle) return null;`（`js/main.js:278`），而**那条出口屏幕上还是上一局
+`begin()` 的第一条出口是 `if (!puzzle) return null;`（`js/main.js:393`），而**那条出口屏幕上还是上一局
 那块盘**：解冻写在它之前，就等于替一块旧盘抹表、解冻，赢下去记的是一个偏小的 `ms`。修法是
-`adoptFreshBoard()` 排在出口**之后**（`js/main.js:287`，函数在 `:729-733`：`paused = false`、`baseElapsed = 0`、
+`adoptFreshBoard()` 排在出口**之后**（`js/main.js:399`，函数在 `:942-948`：`paused = false`、`baseElapsed = 0`、
 把按钮画对），同时它还得排在 `setMode(BLACK)` 与 `startClock()` 之前，否则冻着的盘会把新局的默认画笔
 挡在闸外。**这一条不能靠跑一遍来钉**：`generate()` 要 `tries = 300` 次全部失败才返回 null，
 真实行为里没有那条出口可走（与 dosun 的 D20 同一个理由）。于是钉**源码形状**——`pause` 场景把
@@ -409,8 +409,8 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 `//` 与 `/* */` 再判——钉的是代码，不是散文。
 
 **③ 两条互不知情的解冻路，只有一条会重画按钮** —— 表现为一把看着解不开的死锁：盘面已经能画了，
-按钮还写着「继续」，按下去变成"再暂停一次"。修法是 `startClock()` **不碰** `paused`（`js/main.js:145-156`，
-理由就写在函数头上），解冻只剩 `setPaused(false)`（`js/main.js:711-718`）与 `adoptFreshBoard()` 两处，
+按钮还写着「继续」，按下去变成"再暂停一次"。修法是 `startClock()` **不碰** `paused`（`js/main.js:202-209`，
+理由就写在函数头上），解冻只剩 `setPaused(false)`（`js/main.js:239-264`）与 `adoptFreshBoard()` 两处，
 两处都画按钮。钉法同样是源码形状（`startClock() 不顺手解冻（解冻只有两处）`）+ 两条行为腿
 （`换一局把按钮画对`、`换一局松开按下态`）。
 
@@ -445,7 +445,7 @@ stars-and-bars（`m` 段、`R` 个黑、`s` 格 ⇒ `C(s-R+1, m)`），圈环用
 
 ```bash
 npm run check                  # 逐文件 node --check + 入口断言 → OK（exit 0）
-npm test                       # → 359 条断言通过 / 0 条失败（exit 0）
+npm test                       # → 383 条断言通过 / 0 条失败（exit 0）
 node tools/bake.mjs --check    # → ✓ 30 局复验一致，js/data/library.js 与重跑逐字节相同
                                #   五档各自「超预算 0」；最深 380/1006/1202/2072/79444 节点（预算 500000）
 SAMPLES=24 npm run balance     # → 结论：阶梯与两条承诺都成立（exit 0）
@@ -481,14 +481,14 @@ BASE_URL=https://z-biz-game.github.io/z-biz-game-tapa-cos/ npm run verify
   两份文档里所有引用这个数的句子跟着改了。这不是"改 want 凑输出"——那一条的期望值 `pcount([1,1], 8) = 20`
   仍然由 :309-320 那八行分位表算式独立撑着（`k=2` 那一行把 `[2]` 与 `[1,1]` 一起加进 C(8,2)）。
 - **文档行号对账为什么允许"续引"借出处，又为什么只允许借一步。** 本仓文档有第三种写法：完整引用后面
-  光写行号——比如先写 `js/main.js:166-168`，后面 `js/main.js:247-249`、`:263-265` 就只写行号。
-  一条都不认的腿会在大半份文档上说"干净"，所以 `inheritedPath`（`tools/engine-test.mjs:895-906`）把
+  光写行号——比如先写 `js/main.js:217-225`，后面 `js/main.js:362-376`、`:378-388` 就只写行号。
+  一条都不认的腿会在大半份文档上说"干净"，所以 `inheritedPath`（`tools/engine-test.mjs:955-966`）把
   裸 `:行号` 认给**同一句里最近的那条完整引用**；跨行只在句子还开着的时候允许——句号、空行、新标题都截断。
   为什么借的资格只给写成 `文件:行号` 的那一条？因为这份文件里就有一句反例：「先跑
   `tools/balance.mjs` 的分位表，把实测区间填回代码，再拿它当门禁」后面那条续引讲的是**出题器**的注释，
   不是 balance 的。把正文里点名的文件当出处，就会把这类句子读成"绿在了别的文件上"——
   那比红贵得多。借不到的那些不算错，也不静默放过：它们汇成页面上的「无法定址」那个数，
-  由 `tools/engine-test.mjs:1070` 的 `gapClaims` 当等式闸钉住，多一条借不到的续引就红一次。
+  由 `tools/engine-test.mjs:1130` 的 `gapClaims` 当等式闸钉住，多一条借不到的续引就红一次。
 - **为什么"在界内"还不够，还要判被指的那几行是不是整段空行。** 一条 `文件:行号` 落在 1 与文件行数之间，
   只说明它没写出格；如果那几行是空的，它指到的就不是代码，而 bounds 与锚点两道查都不看内容——无锚点的
   引用尤其如此，它今天唯一的判据就是"在界内"。所以这条腿在两道查之间加了一道：被指的区间 join 之后

@@ -438,13 +438,13 @@ function paint(A, t) {
 // ---------- 7) 全屏：绑到真实存在的按钮，状态回写文案 ----------
 {
   await freshApp();
-  eq('index.html 里真有 #btn-full', /id="btn-full"/.test(fs.readFileSync(path.join(root, 'index.html'), 'utf8')), true);
-  click('#btn-full');
+  eq('index.html 里真有 #btn-fullscreen', /id="btn-fullscreen"/.test(fs.readFileSync(path.join(root, 'index.html'), 'utf8')), true);
+  click('#btn-fullscreen');
   const entered = documentStub.fullscreenElement !== null;
-  eq('按下后文案换字', qsel('#btn-full').textContent, '退出全屏');
-  eq('按下后 aria-pressed 跟上', qsel('#btn-full')['attr_aria-pressed'], 'true');
-  click('#btn-full');
-  ok('再按真的退出', entered && documentStub.fullscreenElement === null && qsel('#btn-full').textContent === '全屏', `文案=${qsel('#btn-full').textContent}`);
+  eq('按下后文案换字', qsel('#btn-fullscreen').textContent, '退出全屏');
+  eq('按下后 aria-pressed 跟上', qsel('#btn-fullscreen')['attr_aria-pressed'], 'true');
+  click('#btn-fullscreen');
+  ok('再按真的退出', entered && documentStub.fullscreenElement === null && qsel('#btn-fullscreen').textContent === '全屏', `文案=${qsel('#btn-fullscreen').textContent}`);
 }
 
 // ---------- 8) 注册脚本：file:// 静默跳过，http(s) 按 baseURI 解析 ----------

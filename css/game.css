@@ -103,9 +103,10 @@ button.link {
   border: 0;
   background: none;
   color: var(--ink-faint);
-  padding: 11px 8px;
-  /* 页脚那个"清空存档"也是按得着的控件，不给它豁免：文字保持 12px 的小，命中区靠 padding 撑到 44。 */
-  min-height: 44px;
+  padding: 0 4px;
+  /* 页脚「清空存档」是全仓唯一一条点名豁免：12px 字、不撑 44 命中区。带 !important 的硬下限
+     用 `button:not(.link)` 跳过它（见文件末尾那条底线），豁免必须两个字面量一起成立才有意义。 */
+  min-height: 0;
   text-decoration: underline;
   font-size: 12px;
 }
@@ -457,8 +458,8 @@ body {
    ============================================================ */
 :root { --touch-min: 44px; }
 /* `:not(.link)` 不是美化：button.link（游戏页脚那条清空存档）是本仓唯一一条**点名**的豁免，
-   上面 98 行的 `min-height: 0` 就是它的声明。硬下限带 !important，会无条件盖掉它——
-   于是"豁免"只剩文档里那句话，而 tools/scenarios.js 那条「豁免不是空集」量的正是这句话。 */
+   上面 button.link 那条规则里的 `min-height: 0` 就是它的声明。硬下限带 !important，会无条件
+   盖掉它——于是"豁免"只剩文档里那句话，而 tools/scenarios.js 那条「豁免不是空集」量的正是这句话。 */
 button:not(.link),
 select,
 input,

@@ -1081,9 +1081,9 @@ for (const [label, board] of crossBoards) {
 
   ok('文档行号对账：解析到的引用条数多到它自己算覆盖面（少于 60 条就是输入集缩了）', refs >= 60, `本次解析 ${refs} 条`);
   eq('文档行号对账：每条 文件:行号 都在盘上、都落在真实行数内', off.length, 0);
-  if (off.length) console.log(off.slice(0, 12).map((x) => `       ${x}`).join('\n'));
+  if (off.length) console.log(off.slice(0, 200).map((x) => `       ${x}`).join('\n'));
   eq('文档行号对账：贴着引用的那个名字真的出现在被指的那几行里', anchorBad.length, 0);
-  if (anchorBad.length) console.log(anchorBad.slice(0, 12).map((x) => `       ${x}`).join('\n'));
+  if (anchorBad.length) console.log(anchorBad.slice(0, 200).map((x) => `       ${x}`).join('\n'));
   ok('文档行号对账：带指认的引用不少于 8 条（少了就是锚点半边在空转）', anchored >= 8, `本次认到锚点 ${anchored} 条`);
   console.log(`文档门：${docFiles.length} 份文档由目录现数，解析 ${refs} 条 文件:行号（其中续引借到出处 ${contRefs} 条、` +
     `带指认 ${anchored} 条），另有 ${unaddressed} 处续引在同一句里借不到出处`);
@@ -1092,23 +1092,23 @@ for (const [label, board] of crossBoards) {
   // the inherited path must really feed the bounds check, and the walls must hold — a sentence that
   // ended, a blank line, and a new heading each stop the inheritance. Each is its own assertion
   // because each can fail in a way the others cannot see.
-  const contG = audit('出处 `js/main.js:166-168`、`useHint`（`:247-249`）');
+  const contG = audit('出处 `js/main.js:217-225`、`useHint`（`:362-376`）');
   ok('文档行号对账：续引继承同一行前头的出处（两条都解析到 js/main.js 且都判绿）',
     contG.refs.length === 2 && contG.refs.every((r) => r.path === 'js/main.js') && contG.anchorBad.length === 0,
     `refs=${contG.refs.map((r) => `${r.path}:${r.from}-${r.to}/${r.anchor}`).join(' ')} 红=${contG.anchorBad.join('|')}`);
-  const contW = audit('上面 `js/main.js:166-168`。\n下面 `undo`（`:263-265`）');
+  const contW = audit('上面 `js/main.js:217-225`。\n下面 `undo`（`:378-388`）');
   ok('文档行号对账：句子已经句号收住，续引不许跨过它去追上一句的文件（跨过去的那条落进「无法定址」）',
     contW.refs.length === 1 && contW.unaddressed === 1,
     `refs=${contW.refs.length} 无法定址=${contW.unaddressed}`);
-  const contP = audit('上面 `js/main.js:166-168`、\n下面 `undo`（`:263-265`）');
+  const contP = audit('上面 `js/main.js:217-225`、\n下面 `undo`（`:378-388`）');
   ok('文档行号对账：句子没写完时软换行可以续（散文折行是本仓最常见的写法）',
     contP.refs.length === 2 && contP.refs[1].path === 'js/main.js' && contP.unaddressed === 0,
     `refs=${contP.refs.map((r) => r.path + ':' + r.from).join(' ')} 无法定址=${contP.unaddressed}`);
-  const contH = audit('出处 `js/main.js:166-168`\n\n## 新一节\n`undo`（`:263-265`）');
+  const contH = audit('出处 `js/main.js:217-225`\n\n## 新一节\n`undo`（`:378-388`）');
   ok('文档行号对账：空行与标题之后不再继承上一节的出处（那种写法必须落进「无法定址」）',
     contH.refs.length === 1 && contH.unaddressed === 1,
     `refs=${contH.refs.length} 无法定址=${contH.unaddressed}`);
-  const contB = audit('出处 `js/main.js:166-168`、`useHint`（`:99999`）');
+  const contB = audit('出处 `js/main.js:217-225`、`useHint`（`:99999`）');
   ok('文档行号对账：借来的出处真的参与越界判定（续引写一个不存在的行号必须红）', contB.off.length === 1,
     contB.off.join(' | ') || '（没有红——继承只是摆设）');
   const contF = audit('守它的断言全在 `tools/engine-test.mjs` §1（`:94-127`）');

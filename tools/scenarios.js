@@ -116,7 +116,10 @@
   }
   // The middle of a cell: no grid line (those sit on the boundaries) and no clue plate (those sit at
   // the renderer's SLOT_ANCHOR fractions, never at 0.5/0.5) — so this pixel reads the cell's own
-  // colour, which is the one thing the three states 黑 / 白 / 未定 have to differ in.
+  // colour, which is the one thing the three states 黑 / 白 / 未定 have to differ in. The 0.1-alpha
+  // paper grain is painted over the fills (js/render/board.js 的 drawGrain), and it darkens a bright
+  // fill by up to 21 — a read of a bright token needs a tolerance that admits the texture (26), not
+  // the 8 that was enough before the grain landed.
   const centrePixel = (t) => {
     const r = A().view.cellRect(t);
     return pixel(r.x + r.size / 2, r.y + r.size / 2);
@@ -138,24 +141,23 @@
     }
     return hit;
   }
-  // The ring a hint (or a contradiction) leaves around the cell it just named: a rounded rect inset
-  // 2px from the cell square. Only the straight middle of each side is sampled, so the corner radius
-  // cannot hide the stroke and a neighbour's digit plate cannot fake it.
-  function onPulseRect(t, color, tol) {
+  // The ring a hint (or a contradiction) leaves around the cell it just named. Two pictures ship:
+  // the decoded `pulse-hoop` texture (ring at 23/64 of its own 1.05-cell draw, i.e. ≈0.37 cell
+  // radius) and the vector fallback (rounded-rect stroke inset 2px, ≈0.42 cell). Decode timing —
+  // not the game state — decides which one is on screen, so the sampler reads a radial band wide
+  // enough to contain both; a control cell, which has neither, still reads zero.
+  function onPulseRing(t, color, tol) {
     const v = A().view;
     const r = v.cellRect(t);
-    const cell = r.size;
-    const inset = 2;
-    const lw = Math.max(2.5, cell * 0.09);
+    const cx = r.x + r.size / 2;
+    const cy = r.y + r.size / 2;
     const want = hex(color);
-    const lo = inset + lw;
-    const hi = cell - inset - lw;
     let hit = 0;
-    const n = 8;
-    for (let k = 0; k < n; k++) {
-      const f = lo + ((hi - lo) * k) / (n - 1);
-      for (const xy of [[r.x + f, r.y + inset], [r.x + f, r.y + cell - inset], [r.x + inset, r.y + f], [r.x + cell - inset, r.y + f]]) {
-        if (near(pixel(xy[0], xy[1]), want, tol)) hit++;
+    for (const frac of [0.34, 0.37, 0.40, 0.43]) {
+      const rad = r.size * frac;
+      for (let k = 0; k < 24; k++) {
+        const ang = (k / 24) * Math.PI * 2;
+        if (near(pixel(cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad), want, tol)) hit++;
       }
     }
     return hit;
@@ -688,13 +690,13 @@
     const previewed = centrePixel(col[1]);
     eq('下笔未收，步数不动', Number(text('#stat-moves')), movesBefore);
     eq('下笔未收，面板读数不动', text('#stat-blacks'), blacksBefore);
-    ck('预览不是纯黑（手指下淡了一层）', !near(previewed, hex(TH().ink), 8), JSON.stringify(previewed));
+    ck('预览不是纯黑（手指下淡了一层）', !near(previewed, hex(TH().ink), 26), JSON.stringify(previewed));
     ck('预览仍比未定亮一点', previewed[0] > hex(TH().surfaceLift)[0], JSON.stringify({ got: previewed, lift: hex(TH().surfaceLift) }));
     pointer('pointerup', p1.x, p1.y);
     await wait(40);
     eq('收笔后两格落黑', [0, 1].filter((r) => g.valueOf(g.cellAt(0, r)) === en.BLACK).length, 2);
     eq('收笔算一步', Number(text('#stat-moves')), movesBefore + 1);
-    ck('收笔后画布是纯黑', near(centrePixel(col[1]), hex(TH().ink), 8), JSON.stringify(centrePixel(col[1])));
+    ck('收笔后画布是纯黑', near(centrePixel(col[1]), hex(TH().ink), 26), JSON.stringify(centrePixel(col[1])));
     eq('面板黑格读数跟上', text('#stat-blacks'), String(Number(blacksBefore) + 2));
 
     // sweeping back over the anchor must not turn the gesture into a tap
@@ -740,7 +742,7 @@
     await tap(clued);
     eq('再点变白就是错', g.valueOf(clued), en.WHITE);
     eq('错一步就被点名一次', text('#stat-conflicts'), '1');
-    // What the state line actually says, in the app's own words (js/main.js:128-132): a white on a
+    // What the state line actually says, in the app's own words (js/main.js:185-190): a white on a
     // clue cell is not just a mismatch the pencil path can live with — it proves no completion
     // exists, so the line makes the stronger claim and the count rides on #stat-conflicts above.
     ck('状态行说出这一盘已经和数字矛盾', /已经和数字矛盾了/.test(text('#state-line')), text('#state-line'));
@@ -763,7 +765,7 @@
     ck('胜利遮罩出现', shown('#win-veil'));
     ck('胜利文案写 0 次提示', /提示 0 次/.test(text('#win-meta')), text('#win-meta'));
     ck('手工通关写下纪录', !!en.Store.best('newbie'), JSON.stringify(en.Store.best('newbie')));
-    ck('终局把格子画成绿的', near(centrePixel(g2.cellAt(1, 1)), hex(TH().success), 12), JSON.stringify(centrePixel(g2.cellAt(1, 1))));
+    ck('终局把格子画成绿的', near(centrePixel(g2.cellAt(1, 1)), hex(TH().success), 24), JSON.stringify(centrePixel(g2.cellAt(1, 1))));
     await open('newbie', 'scen|ink-win2');
     const g3 = A().game;
     for (let i = 0; i < g3.board.n; i++) A().stroke([i], en.BLACK);
@@ -851,17 +853,17 @@
     const g2 = await open('newbie', 'scen|hint-pulse');
     const info2 = A().useHint();
     await wait(30);
-    const pulsed = onPulseRect(info2.cell, TH().hint, 26);
+    const pulsed = onPulseRing(info2.cell, TH().hint, 45);
     const dc = (i) => Math.abs((i % g2.w) - (info2.cell % g2.w));
     const dr = (i) => Math.abs((((i / g2.w) | 0)) - (((info2.cell / g2.w) | 0)));
     const control = [...Array(g2.board.n).keys()].find((i) => dc(i) > 1 && dr(i) > 1);
     ck('提示把刚点出的那一格圈出来', pulsed >= 8, `圈线采样 ${pulsed}/32 @${g2.board.name(info2.cell)}`);
-    eq('别的格没有被圈（对照）', onPulseRect(control, TH().hint, 26), 0);
+    eq('别的格没有被圈（对照）', onPulseRing(control, TH().hint, 45), 0);
     eq('提示框说的是规则而不是答案', text('#hint-rule'), `规则：${info2.rule}`);
     eq('提示说的是哪一格落哪一色', text('#hint-line'), info2.why);
     await wait(1700); // the pulse fades out; the picture must go back to plain ink
-    eq('脉冲淡出后不留蓝（对照）', onPulseRect(info2.cell, TH().hint, 26), 0);
-    ck('淡出后那一格还是墨色', near(centrePixel(info2.cell), hex(info2.value === en.BLACK ? TH().ink : TH().bgBottom), 8), JSON.stringify({ got: centrePixel(info2.cell), value: info2.value }));
+    eq('脉冲淡出后不留蓝（对照）', onPulseRing(info2.cell, TH().hint, 45), 0);
+    ck('淡出后那一格还是墨色', near(centrePixel(info2.cell), hex(info2.value === en.BLACK ? TH().ink : TH().bgBottom), 26), JSON.stringify({ got: centrePixel(info2.cell), value: info2.value }));
 
     // a second board must not be walkable by reusing the first one's script
     const g3 = await open('hard', 'scen|hint2');
@@ -892,7 +894,7 @@
     ck('状态行说出矛盾', /矛盾/.test(text('#state-line')), text('#state-line'));
     ck('待定读数被标成警示色', $('#stat-remaining').closest('.stat').classList.contains('bad'));
     eq('提示框说的是矛盾而不是答案', text('#hint-rule'), '这里和线索矛盾');
-    ck('矛盾时画布点出错格', onPulseRect(first.cell, TH().error, 30) >= 8, String(onPulseRect(first.cell, TH().error, 30)));
+    ck('矛盾时画布点出错格', onPulseRing(first.cell, TH().error, 30) >= 8, String(onPulseRing(first.cell, TH().error, 30)));
     A().stroke([first.cell], en.UNKNOWN);
     await wait(40);
     eq('擦掉错墨之后矛盾消失', g.state().stuck, false);
@@ -900,7 +902,7 @@
     eq('这时提示才肯落子', A().useHint().value, first.value);
     eq('这次才计一次提示', text('#stat-hints'), '1');
     eq('落的就是线索要的那一色', g.valueOf(first.cell), first.value);
-    ck('落子后画布上是墨或白', near(centrePixel(first.cell), hex(first.value === en.BLACK ? TH().ink : TH().bgBottom), 8), JSON.stringify(centrePixel(first.cell)));
+    ck('落子后画布上是墨或白', near(centrePixel(first.cell), hex(first.value === en.BLACK ? TH().ink : TH().bgBottom), 26), JSON.stringify(centrePixel(first.cell)));
 
     // the 2×2 and connectivity faults reach the panel as numbers, not as prose
     await open('hard', 'scen|conflict2');
@@ -921,7 +923,7 @@
     eq('满盘皆黑时每一格都落在某个二乘二里', g2.state().blocks, g2.board.n);
     eq('面板读数是引擎的破法条数', text('#stat-conflicts'), String(faults.length));
     eq('满盘皆黑时一条数字都没对上', g2.state().satisfied, 0);
-    // js/main.js:128-132 keeps two sentences for the state line: the 矛盾 one (no completion exists)
+    // js/main.js:185-190 keeps two sentences for the state line: the 矛盾 one (no completion exists)
     // and `${problems} 处对不上` for "wrong but not yet dead". Measured over every one- and two-cell
     // write on all five shipped boards (51,048 states: 2·n singles + 4·C(n,2) doubles per board, so
     // 1,250 / 3,842 / 8,644 / 21,766 / 51,048 cumulative) plus 4,000 random partial fillings, a visible
@@ -985,7 +987,7 @@
     await wait(40);
     eq('两格都落对了，没有冲突', g.state().conflicts, 0);
     ck('0 0 0 的格子画成白', near(centrePixel(zc), hex(TH().bgBottom), 8), JSON.stringify(centrePixel(zc)));
-    ck('带数字的格子画成黑', near(centrePixel(pc), hex(TH().ink), 8), JSON.stringify(centrePixel(pc)));
+    ck('带数字的格子画成黑', near(centrePixel(pc), hex(TH().ink), 26), JSON.stringify(centrePixel(pc)));
     ck('没定的格子画成第三种颜色', near(centrePixel(uc), hex(TH().surfaceLift), 8), JSON.stringify(centrePixel(uc)));
     ck('虚线环在落墨之后仍然只在 0 0 0 上', onCircle(zc, 0.3, TH().zeroClue, 22, 24) >= 8 && onCircle(pc, 0.3, TH().zeroClue, 22, 24) === 0, JSON.stringify({ z: onCircle(zc, 0.3, TH().zeroClue, 22, 24), p: onCircle(pc, 0.3, TH().zeroClue, 22, 24) }));
     // the sentinel, stated as data
@@ -1370,10 +1372,13 @@
     // 如果按原样扫，形状闸会把解释当成被禁止的事实。
     const clockCode = clockBody.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
     ck('startClock() 不顺手解冻（解冻只有两处）', !/paused\s*=[^=]/.test(clockCode), clockCode.split('\n').slice(0, 3).join(' | '));
-    for (const fn of ['setMode', 'useHint', 'undo', 'strokeStart', 'strokeEnd']) {
+    for (const fn of ['setMode', 'useHint', 'undo', 'strokeStart']) {
       const body = (src.match(new RegExp(`^function ${fn}\\([\\s\\S]*?\\n\\}`, 'm')) || [''])[0];
       ck(`${fn} 带着冻盘闸`, /blockedWhilePaused/.test(body), fn);
     }
+    // strokeEnd 只是 release() 的入口，鼠标/触屏两条落下路径也直接调 release：闸装在那里一处就够。
+    const relBody = (src.match(/^function release\([\s\S]*?\n\}/m) || [''])[0];
+    ck('release（strokeEnd 的实现）带着冻盘闸', /blockedWhilePaused/.test(relBody), 'release');
     eq('台面三条写入路都带闸', lineOf(/^ {4}if \(blockedWhilePaused\('台面/).length, 3);
     // 报的数都取自"暂停之前到赢下来"那一段：后面几步换过盘，A().elapsed() 已经是另一局的表。
     return report({ cuts: cuts.length, blocked: A().blocked().count, blockedBase: base, recordedMs: rec ? rec.ms : -1, extraMs: rec ? rec.ms - tPause : -1 });
@@ -1453,7 +1458,7 @@
     // legend, keyhint and stats: the panel has to describe the picture it ships
     eq('图例六项', document.querySelectorAll('.legend span').length, 6);
     ck('图例的黑与画布的黑同色', near(rgb(getComputedStyle($('.sw-ink')).backgroundColor), hex(TH().ink), 6), `${rgb(getComputedStyle($('.sw-ink')).backgroundColor).join(',')} vs ${TH().ink}`);
-    // The `0 0 0` legend item is not a filled square: css/game.css:366-370 gives it a dashed hoop in
+    // The `0 0 0` legend item is not a filled square: css/game.css:381-386 gives it a dashed hoop in
     // the same teal the canvas draws, so the swatch is read from its border, not its background.
     const zeroSw = getComputedStyle($('.sw-zero'));
     ck('图例的 0 0 0 是青色虚线环（和画布同一个色）', near(rgb(zeroSw.borderTopColor), hex(TH().zeroClue), 6) && zeroSw.borderTopStyle === 'dashed' && zeroSw.borderRadius === '50%', `${zeroSw.borderTopStyle} ${zeroSw.borderTopColor} r=${zeroSw.borderRadius} vs ${TH().zeroClue}`);
@@ -1463,8 +1468,8 @@
     ck('操作提示讲清手势', /点击/.test(text('.keyhint')) && /拖动/.test(text('.keyhint')) && /撤销/.test(text('.keyhint')), text('.keyhint'));
     eq('统计项八条', document.querySelectorAll('.stats .stat').length, 8);
     eq('触摸最小尺寸写进 CSS 变量', cssVar('--touch-min'), '44px');
-    // 44×44 is what the sheet asks of "every pressable thing" (css/game.css:58-70, `min-height:
-    // var(--touch-min)`), and css/game.css:93-100 carves out exactly one exemption on purpose:
+    // 44×44 is what the sheet asks of "every pressable thing" (css/game.css:65-80, `min-height:
+    // var(--touch-min)`), and css/game.css:102-112 carves out exactly one exemption on purpose:
     // `button.link` sets `min-height: 0` and a 12px font, because the only thing wearing that class is
     // the 清空存档 text link in the footer. So the floor is measured over the buttons that carry it —
     // both axes, and only over targets with real client rects, since a view that is hidden has nothing
@@ -1486,7 +1491,7 @@
     const touchRoster = () => liveButtons().filter((x) => !x.classList.contains('link')).map(who).join(',');
     // Measured roster on the board screen with no overlay up: the header's four buttons (音效 / 动效
     // / 暂停 / 全屏), the three brush modes and the four action buttons — eleven targets that all
-    // carry css/game.css:65's `min-height: var(--touch-min)`, plus the footer's exempt text link.
+    // carry css/game.css:74's `min-height: var(--touch-min)`, plus the footer's exempt text link.
     // Pinned by id, so a control that disappears (or a new one that never clears 44) fails here
     // instead of sliding the floor down.
     const GAME_TARGETS = ['btn-sound', 'btn-motion', 'btn-pause', 'btn-fullscreen', 'btn-mode-black', 'btn-mode-white', 'btn-mode-erase', 'btn-hint', 'btn-undo', 'btn-new', 'btn-menu'];
@@ -1500,7 +1505,7 @@
     A().show('menu');
     await wait(40);
     // Measured: the board on screen here is *in progress*, not won — leaving the game view runs
-    // flushResume (js/main.js:140), so the menu carries the header's two toggles, the five tier cards
+    // flushResume (js/main.js:197), so the menu carries the header's two toggles, the five tier cards
     // and the 继续 button. That is the roster the 44 floor is read over; the same button is
     // re-measured by id in the resume scenario, which is the one that plays the save.
     const menuTouch = liveButtons().filter((x) => !x.classList.contains('link'));
@@ -1544,9 +1549,13 @@
     })(), JSON.stringify({ c: $('.win-card').getBoundingClientRect(), w: $('#board-wrap').getBoundingClientRect() }));
     ck('胜利按钮点得到', $('#btn-again').getBoundingClientRect().width > 40);
     // Row/column to cell index is the Game's job (js/ui/game.js:65, also on the window.tapa surface at
-    // js/main.js:537); the engine's board object carries geometry only, no cellAt.
+    // js/main.js:538); the engine's board object carries geometry only, no cellAt.
     const last = g.cellAt(5, 5);
-    ck('终局把整片格子画成绿的', near(centrePixel(last), hex(TH().success), 12), JSON.stringify({ last, px: centrePixel(last) }));
+    // 纸纹在格子填色之后以 0.1 alpha 压上去，绿色最多被压暗 21/255；庆祝的金色墨点还没落地时
+    // 采样会读到一颗飞过的亮点（实测最坏 32）。等庆祝那一掷走完再量，容差与另外两处画布配色
+    // 断言（绿环 / 虚线环）同为 24 —— 都是"同一种绿、同一层纸纹"的读数。
+    await wait(1000);
+    ck('终局把整片格子画成绿的', near(centrePixel(last), hex(TH().success), 24), JSON.stringify({ last, px: centrePixel(last) }));
     ck('终局那一格是盘心第 6 行第 6 列', b.name(last), '第6行6列');
     ck('终局也画不出界', A().view.canvas.getBoundingClientRect().bottom <= window.innerHeight + 1, String(A().view.canvas.getBoundingClientRect().bottom));
     return report({ cell: geo.cell, dpr: geo.dpr, clues: b.clues, hints: g.hints, steps: res.steps });

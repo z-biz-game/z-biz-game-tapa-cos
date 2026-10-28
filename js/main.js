@@ -244,9 +244,12 @@ function setPaused(next) {
   // 顺序反过来，继续 按下去只是把计时基准换了一下，帧循环再也起不来。
   paused = want;
   if (want) {
+    // 一笔拖到半路被暂停：预览先擦回去（冻住的盘面不能挂着半截墨），但这一笔的骨架留着并记上
+    // voided —— 指针松开那一步（release）才知道该作废哪一笔、该为哪一笔记账。在这里把 stroke
+    // 置空，收笔路径就只剩一个"没有笔画"的空返回，这一刀永远点不上名。
     if (stroke) {
       unpreview();
-      stroke = null;
+      stroke.voided = true;
     }
     flushResume();
     stopClock();
@@ -357,7 +360,8 @@ function afterStep(step) {
 }
 
 function useHint() {
-  if (!game || game.status === 'won' || paused) return null;
+  if (!game || game.status === 'won') return null;
+  if (blockedWhilePaused('提示')) return null;
   const before = game.hints;
   const info = game.hint();
   if (!info) return null;
@@ -372,7 +376,8 @@ function useHint() {
 }
 
 function undo() {
-  if (!game || paused) return null;
+  if (!game) return null;
+  if (blockedWhilePaused('撤销')) return null;
   const step = game.undo();
   if (!step) return null;
   clearPulse();
@@ -391,8 +396,7 @@ function begin({ tier = TIERS[0].key, seed = null, resume = null } = {}) {
   fx.reset();
   stroke = null;
   el.winVeil.hidden = true;
-  clearPause();
-  baseElapsed = 0;
+  adoptFreshBoard();
   // A save that does not fit the board it is being replayed onto is dropped whole: the run starts
   // clean rather than resuming a shifted picture with someone else's clock on it.
   const sheet = resume ? Store.resumeBoard(game.board.n) : null;
@@ -539,7 +543,7 @@ function press(clientX, clientY, button) {
 }
 
 function drag(clientX, clientY) {
-  if (!stroke || !game) return;
+  if (!stroke || !game || stroke.voided) return;
   const t = view.hitCell(clientX, clientY);
   // Sweeping back over the cell we started on must not un-travel the gesture: the stroke has already
   // painted cells, and committing it as a tap would throw them away.
@@ -555,9 +559,9 @@ function release() {
   stroke = null;
   // 拖到一半被暂停（一只手压着鼠标、另一只手按 P 是真做得到的一件事）：这一笔整个作废，
   // 预览擦回去之后不提交 —— 冻住的盘面不能因为"手势开始于解冻时"就从缝里收下这一笔。
-  if (paused) {
+  if (paused || s.voided) {
     unpreview(s);
-    blockedWhilePaused('拖到一半的那一笔');
+    if (paused) blockedWhilePaused('拖到一半的那一笔');
     return null;
   }
   const cells = s.items.map((it) => it.cell);
@@ -588,9 +592,11 @@ function cancelStroke() {
 }
 
 function strokeStart(ev) {
-  if (!game || game.status === 'won' || paused) return;
-  if (!press(ev.clientX, ev.clientY, ev.button)) return;
+  if (!game || game.status === 'won') return;
+  if (view.hitCell(ev.clientX, ev.clientY) < 0) return;
   ev.preventDefault();
+  if (blockedWhilePaused('这一笔')) return;
+  if (!press(ev.clientX, ev.clientY, ev.button)) return;
   el.canvas.setPointerCapture?.(ev.pointerId);
 }
 
@@ -679,8 +685,10 @@ $('#btn-menu-2').addEventListener('click', () => show('menu'));
 $('#btn-again').addEventListener('click', () => begin({ tier: game ? game.puzzle.tier : TIERS[0].key }));
 $('#btn-pause').addEventListener('click', () => setPaused(!paused));
 $('#btn-unpause').addEventListener('click', () => setPaused(false));
-$('#btn-full').addEventListener('click', toggleFullscreen);
+$('#btn-fullscreen').addEventListener('click', toggleFullscreen);
 document.addEventListener('fullscreenchange', syncFullButton);
+document.addEventListener('webkitfullscreenchange', syncFullButton);
+document.addEventListener('MSFullscreenChange', syncFullButton);
 $('#btn-resume').addEventListener('click', () => {
   const r = Store.resume();
   // No origin seed means no way to rebuild *that* board — the generator is deterministic in its
@@ -739,24 +747,24 @@ window.addEventListener('keydown', (ev) => {
     setPaused(!paused);
     return;
   }
-  if (paused) return;
-  if (k === 'r') {
-    if (!game) return;
-    ev.preventDefault();
-    begin({ tier: game.puzzle.tier });
-    return;
-  }
-  if (k === 'enter' && game && game.status === 'won') {
-    ev.preventDefault();
-    begin({ tier: game.puzzle.tier });
-    return;
-  }
+  // 五条玩法键先走各自的写手，闸装在那里：暂停时按 H 也要拿到一句"提示没有落地"，
+  // 而不是整条 listener 提前 return 让玩家以为键盘坏了。
   if (k === 'h') useHint();
   else if (k === 'z') undo();
   else if (k === 'b') setMode(BLACK);
   else if (k === 'w') setMode(WHITE);
   else if (k === 'e') setMode(UNKNOWN);
-  else if (/^[1-5]$/.test(k) && onMenu) begin({ tier: TIERS[Number(k) - 1].key });
+  else {
+    if (paused) return;
+    if (k === 'r') {
+      if (!game) return;
+      ev.preventDefault();
+      begin({ tier: game.puzzle.tier });
+    } else if (k === 'enter' && game && game.status === 'won') {
+      ev.preventDefault();
+      begin({ tier: game.puzzle.tier });
+    } else if (/^[1-5]$/.test(k) && onMenu) begin({ tier: TIERS[Number(k) - 1].key });
+  }
 });
 
 window.addEventListener('resize', draw);
@@ -804,13 +812,15 @@ const surface = {
   // the same gate: `press()` refuses to open a stroke while 暂停, so these two must refuse too —
   // otherwise a browser scenario can paint over a paused board and still report 暂停 生效.
   stroke(cells, value) {
-    if (!game || paused) return null;
+    if (!game) return null;
+    if (blockedWhilePaused('台面那一笔')) return null;
     const step = game.stroke(cells, value === undefined ? game.mode : value);
     if (step) afterStep(step);
     return step;
   },
   tap(t, value) {
-    if (!game || paused) return null;
+    if (!game) return null;
+    if (blockedWhilePaused('台面那一格')) return null;
     const step = value === undefined ? game.tap(t) : game.stroke([t], value);
     if (step) afterStep(step);
     else syncAll();
@@ -827,7 +837,8 @@ const surface = {
     return r;
   },
   elapsed: clock,
-  state: () => (game ? { ...game.state(), elapsedMs: clock() } : null),
+  state: () => (game ? { ...game.state(), elapsedMs: clock(), paused } : null),
+  blocked: () => ({ ...blocked }),
   // 表现层也得能被读到：只挂引擎账本的对拍会把"动画根本没时间轴"当成三档全等。
   fx: () => fx.state(),
   anim: () => ({
@@ -870,22 +881,31 @@ const surface = {
 
 // 全屏要真发请求，也要真读回状态：系统拒绝、浏览器不支持、玩家按 Esc 退出，按钮都得跟着改字
 // —— "按钮写着全屏而屏幕没全屏"就是假开关。
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+}
+
 function toggleFullscreen() {
   const host = document.documentElement;
-  if (document.fullscreenElement) {
-    document.exitFullscreen?.().catch(() => {});
+  const current = fullscreenElement();
+  if (current) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    exit?.call(document)?.catch?.(() => {});
     return false;
   }
-  if (!host.requestFullscreen) return false;
-  host.requestFullscreen().catch(() => {});
+  const req = host.requestFullscreen || host.webkitRequestFullscreen || host.msRequestFullscreen;
+  if (!req) return false;
+  req.call(host)?.catch?.(() => {});
   return true;
 }
 
 function syncFullButton() {
-  const on = !!document.fullscreenElement;
-  const btn = $('#btn-full');
+  const on = !!fullscreenElement();
+  const btn = $('#btn-fullscreen');
   btn.textContent = on ? '退出全屏' : '全屏';
   btn.setAttribute('aria-pressed', String(on));
+  btn.title = '全屏（F）';
+  document.body.classList.toggle('fullscreen', on);
 }
 
 // Two names for one object. `window.App` is the handle the round's brief asks for; `window.tapa` is
@@ -893,77 +913,6 @@ function syncFullButton() {
 // so the verification台 written next round does not have to guess which one shipped.
 window.App = surface;
 window.tapa = surface;
-
-// ---- 全屏开关（#btn-fullscreen）----
-// 绑的是本页 HUD 上真实存在的那个按钮。全屏最常见的假实现就是引用一个并不存在的
-// id：点下去什么也不会发生，量具却算它"已实现"。所以这里找不到按钮就直接不装。
-(function bindFullscreen() {
-  const btn = document.getElementById('btn-fullscreen');
-  if (!btn) return;
-  const root = document.documentElement;
-  // 只做特性检测，不嗅探 UA：iOS Safari 是 webkitRequestFullscreen，老 Edge 是 ms 前缀，
-  // 而 UA 字符串随时会改。"有没有这个能力"是查出来的，不是猜出来的。
-  const req = root.requestFullscreen || root.webkitRequestFullscreen || root.msRequestFullscreen;
-  const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
-  const current = () => document.fullscreenElement || document.webkitFullscreenElement
-    || document.msFullscreenElement || null;
-
-  // 不支持也要给个说法：只把按钮灰掉而不解释，玩家会以为这功能没做完。
-  // supported 这枚标记不能省：下面 sync() 每次都会重写 title，不挡住的话，装的时候刚写
-  // 进去的人话原因会被随后的 sync() 立刻抹成"全屏 (F)"——禁用就变成一句没有理由的禁用。
-  let supported = !!req;
-  const unsupported = () => {
-    supported = false;
-    btn.disabled = true;
-    btn.title = '这个浏览器不提供元素全屏（iOS Safari 请用「添加到主屏幕」独立打开）';
-  };
-  if (!req) unsupported();
-
-  // fullscreen 返回 Promise，被拒时必须吃掉：iOS Safari 对多数非 video 元素直接拒绝，
-  // 让这个 rejection 冒泡出去会变成一条未捕获错误，整局游戏跟着挂。
-  const settle = (p) => { if (p && p.catch) p.catch(unsupported); };
-
-  // 进出都能走：已经全屏时这次调用是退出，不是"再进一次"。
-  function toggle() {
-    try {
-      if (current()) {
-        if (exit) settle(exit.call(document));
-      } else if (req) {
-        settle(req.call(root));
-      } else {
-        unsupported();
-      }
-    } catch (e) {
-      unsupported();
-    }
-  }
-
-  // Esc 和系统手势退出都不经过我们的代码，按钮状态只能靠 fullscreenchange 回写，
-  // 否则用户已经退出、HUD 还停在"退出全屏"，下一次点击反而会重新进全屏。
-  function sync() {
-    const on = !!current();
-    btn.setAttribute('aria-pressed', String(on));
-    btn.textContent = on ? "退出全屏" : "全屏";
-    if (supported) btn.title = "全屏" + '（F）';
-    const body = document.body;
-    if (body && body.classList) body.classList.toggle('fullscreen', on);
-  }
-
-  btn.addEventListener('click', toggle);
-  window.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'f' && ev.key !== 'F') return;
-    const t = ev.target;
-    // 盘号 / 种子这类输入框里打字不能触发全屏，否则玩家输 seed 输到一半屏幕没了。
-    if (t && /input|textarea|select/i.test(t.tagName || '')) return;
-    if (ev.repeat || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    ev.preventDefault();
-    toggle();
-  });
-  window.addEventListener('fullscreenchange', sync);
-  window.addEventListener('webkitfullscreenchange', sync);
-  window.addEventListener('MSFullscreenChange', sync);
-  sync();
-})();
 
 // ---- 暂停：冻住的是两样东西，时钟和盘面 ----
 //
@@ -983,18 +932,6 @@ window.tapa = surface;
 //    新局：begin() 自己解冻、自己把表归零，记的是这块新盘真实花掉的时间，所以它不带一把闸。
 //    挡下来的原因写进 #state-line，不是把控件弄灰：弄灰的按钮玩家按下去得不到任何解释。
 //
-// 用 var 而不是 let：本块在文件末尾，而 startClock() 可能在它之前就被 begin() 调过；
-// let 声明提升不到初始化，TDZ 会直接抛 ReferenceError。
-function paintPauseButton() {
-  var b = document.getElementById('btn-pause');
-  if (!b) return;
-  b.setAttribute('aria-pressed', String(paused));
-  b.textContent = paused ? '继续' : '暂停';
-  b.title = paused ? '继续 (P)' : '暂停 (P)';
-}
-function togglePause() { return setPaused(!paused); }
-function isPaused() { return paused; }
-
 /** 新局接手盘面时才解冻：冻解除、表针归零、按钮跟着画对。
  *
  * 它必须排在 begin() 里 `if (!puzzle) return null` 那条出口**之后**：那条出口屏幕上还是上一局那块盘，
@@ -1003,9 +940,8 @@ function isPaused() { return paused; }
  * 解冻又必须排在 setMode(BLACK) / startClock() 之前：冻着的盘会把新局的默认画笔挡在闸外，
  * 状态行谎报"换画笔没有落地"，按钮还停在「继续」。 */
 function adoptFreshBoard() {
-  paused = false;
+  clearPause();
   baseElapsed = 0;
-  paintPauseButton();
 }
 
 // 每一次被挡下来的操作都记账：闸要的正是"这一刀确实撞在墙上并被点名"，而不是"界面看起来没动"。
@@ -1019,24 +955,3 @@ function blockedWhilePaused(what) {
   el.stateLine.textContent = `已暂停：${what}没有落地。暂停冻住表针，也冻住盘面 —— 按「继续」(P 或空格) 再继续。`;
   return true;
 }
-
-document.getElementById('btn-pause').addEventListener('click', togglePause);
-window.addEventListener('keydown', function (ev) {
-  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  if (ev.target && /input|textarea|select/i.test(ev.target.tagName)) return;
-  var k = ev.key;
-  if (k === 'p' || k === 'P' || k === ' ') { ev.preventDefault(); togglePause(); }
-});
-
-// ---- 静音开关（M）-----------------------------------------------------------------
-// M 键切静音，与全屏/重开/提示同一套键位。
-// 这里只负责把按键翻译成"点一下音效按钮"：真静音在 js/audio/synth.js 里做
-// （suspend AudioContext + 静音态不再新建振荡器节点），偏好由它落盘到 localStorage。
-window.addEventListener('keydown', (ev) => {
-  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  if (ev.target && /^(input|textarea|select)$/i.test(ev.target.tagName || '')) return;
-  if (ev.key === 'm' || ev.key === 'M') {
-    ev.preventDefault();
-    $('#btn-sound').click();
-  }
-});
